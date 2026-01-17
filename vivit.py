@@ -30,9 +30,9 @@ class Attention(nn.Module):
         self.wq = nn.Linear(dim, inner_dim, bias=False)
         self.wk = nn.Linear(dim, inner_dim, bias=False)
         self.wv = nn.Linear(dim, inner_dim, bias=False)
-        self.split_emb_dim = Rearrange("b n (h d) -> b h n d", h=heads)
+        self.split_emb_dim = Rearrange("b t (h d) -> b h t d", h=heads)
         self.drop = nn.Dropout(p=self.p_dropout)
-        self.merge_emb_dim = Rearrange("b h n d -> b n (h d)", h=heads)
+        self.merge_emb_dim = Rearrange("b h t d -> b t (h d)", h=heads)
         self.project = (
             nn.Sequential(
                 nn.Linear(inner_dim, dim),
@@ -64,35 +64,37 @@ class Attention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        x: (B, N, E)
-        :return: (B, N, E)
+        x: (B, T, E)
+        :return: (B, T, E)
         """
-        B, N, E = x.shape
+        B, T, E = x.shape
 
-        x = self.ln1(x)  # (B, N, E)
+        x = self.ln1(x)  # (B, T, E)
 
-        # I = heads * dim_head, inner dimension before splitting for heads
-        q, k, v = self.wq(x), self.wk(x), self.wv(x)  # q, k, v: (B, N, I)
+        # inner_dim = heads * dim_head, inner dimension before splitting for heads
+        q, k, v = self.wq(x), self.wk(x), self.wv(x)  # q, k, v: (B, T, inner_dim)
 
         q, k, v = map(
             lambda t: self.split_emb_dim(t), [q, k, v]
-        )  # q, k, v: (B, H, N, I / H)
+        )  # q, k, v: (B, heads, T, inner_dim / heads)
 
         last_block_attn = None
         if self.use_flash_attn and not self.return_last_block_attn:
-            out = self.flash_attn(q, k, v)  # (B, H, N, I / H)
+            out = self.flash_attn(q, k, v)  # (B, heads, T, inner_dim / heads)
         else:
-            logits = torch.matmul(q, k.transpose(-1, -2)) * self.scale  # (B, H, N, N)
-            attn = Fn.softmax(logits, dim=-1)  # (B, H, N, N)
+            logits = (
+                torch.matmul(q, k.transpose(-1, -2)) * self.scale
+            )  # (B, heads, T, T)
+            attn = Fn.softmax(logits, dim=-1)  # (B, heads, T, T)
 
             if self.return_last_block_attn:
-                last_block_attn = attn  # (B, H, N, N)
+                last_block_attn = attn  # (B, heads, T, T)
 
-            attn = self.drop(attn)  # (B, H, N, N)
-            out = torch.matmul(attn, v)  # (B, H, N, I / H)
+            attn = self.drop(attn)  # (B, heads, T, T)
+            out = torch.matmul(attn, v)  # (B, heads, T, inner_dim / heads)
 
-        out = self.merge_emb_dim(out)  # (B, N, I)
-        out = self.project(out)  # (B, N, E)
+        out = self.merge_emb_dim(out)  # (B, T, inner_dim)
+        out = self.project(out)  # (B, T, E)
         return out, last_block_attn
 
 
@@ -108,16 +110,15 @@ class FeedForward(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        x: (B, N, E)
-        :return: (B, N, E)
+        x: (B, T, E)
+        :return: (B, T, E)
         """
-        # H = hidden dim
-        x = self.ln1(x)  # (B, N, E)
-        x = self.l1(x)  # (B, N, H)
-        x = self.gelu1(x)  # (B, N, H)
-        x = self.drop1(x)  # (B, N, H)
-        x = self.l2(x)  # (B, N, E)
-        x = self.drop2(x)  # (B, N, E)
+        x = self.ln1(x)  # (B, T, E)
+        x = self.l1(x)  # (B, T, hidden_dim)
+        x = self.gelu1(x)  # (B, T, hidden_dim)
+        x = self.drop1(x)  # (B, T hidden_dim)
+        x = self.l2(x)  # (B, T, E)
+        x = self.drop2(x)  # (B, T, E)
         return x
 
 
@@ -170,17 +171,17 @@ class Transformer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        x: (B, N, E)
-        :return: (B, N, E)
+        x: (B, T, E)
+        :return: (B, T, E)
         """
         last_block_attn = None
         for attn, ff in self.layers:
             x_attn, last_block_attn = attn(
                 x
-            )  # x_attn: (B, N, E), last_block_attn: (B, H, N, N)
-            x = x_attn + x  # (B, N, E)
-            x = ff(x) + x  # (B, N, E)
-        x = self.ln1(x)  # (B, N, E)
+            )  # x_attn: (B, T, E), last_block_attn: (B, heads, T, T)
+            x = x_attn + x  # (B, T, E)
+            x = ff(x) + x  # (B, T, E)
+        x = self.ln1(x)  # (B, T, E)
         return x, last_block_attn
 
 
@@ -206,13 +207,13 @@ class PatchEmbedding(nn.Module):
         x: (B, F, C, H, W)
         :return: (B, H / P1, W / P2, E)
         """
-        # N = H / PH * W / PW, the number of patches
-        x = self.patchify(x)  # (B, F, N, PH * PW * C)
-        x = self.ln1(x)  # (B, F, N, PH * PW * C)
-        x = self.l1(x)  # (B, F, N, E)
-        x = self.ln2(x)  # (B, F, N, E)
+        # T = H / PH * W / PW * C, the number of patches/tokens
+        x = self.patchify(x)  # (B, F, T, PH * PW * C)
+        x = self.ln1(x)  # (B, F, T, PH * PW * C)
+        x = self.l1(x)  # (B, F, T, E)
+        x = self.ln2(x)  # (B, F, T, E)
 
-        return x  # (B, F, N, E)
+        return x  # (B, F, T, E)
 
 
 class ViViT(nn.Module):
@@ -273,28 +274,33 @@ class ViViT(nn.Module):
         """
         B, F, C, H, W = x.shape
 
-        # N = H / PH * W / PW * C, the number of patches
-        x = self.patch_emb(x)  # (B, F, N, E)
-        x = x + self.pos_enc  # (B, F, N, E)
-        x = self.flatten_frames(x)  # (B, F * N, E)
+        # T = H / PH * W / PW * C, the number of patches/tokens
+        x = self.patch_emb(x)  # (B, F, T, E)
+        x = x + self.pos_enc  # (B, F, T, E)
+        x = self.flatten_frames(x)  # (B, F * T, E)
 
         cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)  # (B, F * N + 1, E)
+        x = torch.cat((cls_tokens, x), dim=1)  # (B, F * T + 1, E)
         x, last_block_attn = self.transformer(
             x
-        )  # x: (B, F * N + 1, E), last_block_attn: (B, Heads, F * N + 1, F * N + 1)
+        )  # x: (B, F * T + 1, E), last_block_attn: (B, Heads, F * T + 1, F * T + 1)
 
         # fetching [CLS] token
         x = x[:, 0]  # (B, E)
         x = self.l1(x)  # (B, num_classes)
 
-        cls_attn = last_block_attn[:, :, 0, :]  # (B, Heads, F * N + 1)
-        cls_attn = cls_attn[:, :, 1:]  # (B, Heads, F * N)
+        cls_attn = last_block_attn[:, :, 0, :]  # (B, Heads, F * T + 1)
+        cls_attn = cls_attn[:, :, 1:]  # (B, Heads, F * T)
 
         return x, cls_attn
 
 
-class HierarchicalViT(nn.Module):
+class FactorizedViViT(nn.Module):
+    """
+    Factorized Vision Transformer. First transformer does per frame, spatial attention.
+    Second transformer does temporal attention on the first transformers [CLS] tokens.
+    """
+
     def __init__(
         self,
         image_size: Tuple[int, int],
@@ -303,14 +309,12 @@ class HierarchicalViT(nn.Module):
         channels: int,
         n_classes: int,
         dim: int,
-        depth1: int,
-        depth2: int,
-        heads1: int,
-        heads2: int,
-        dim_head1: int,
-        dim_head2: int,
-        mlp_dim1: int,
-        mlp_dim2: int,
+        spatial_depth: int,
+        temporal_depth: int,
+        spatial_heads: int,
+        temporal_heads: int,
+        dim_head: int,
+        mlp_dim: int,
         dropout: float = 0.0,
         use_flash_attn: bool = True,
         return_cls_attn: bool = False,
@@ -319,35 +323,34 @@ class HierarchicalViT(nn.Module):
 
         ih, iw = image_size
         ph, pw = patch_size
-        n_patches = ih // ph * iw // pw
+        patches = ih // ph * iw // pw
 
         self.patch_emb = PatchEmbedding(patch_size, channels, dim)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
-        self.pos_enc = nn.Parameter(torch.randn(1, frames, n_patches + 1, dim))
-        self.flatten_frames = Rearrange("b f n e -> b (f n) e")
+        self.spatial_cls_token = nn.Parameter(torch.zeros(1, 1, dim))
+        self.spatial_pos_enc = nn.Parameter(torch.randn(1, frames, patches + 1, dim))
+        self.flatten_frames = Rearrange("b f n e -> (b f) n e")
 
-        self.t1 = Transformer(
+        self.spatial_transformer = Transformer(
             dim=dim,
-            depth=depth1,
-            heads=heads1,
-            dim_head=dim_head1,
-            mlp_dim=mlp_dim1,
+            depth=spatial_depth,
+            heads=spatial_heads,
+            dim_head=dim_head,
+            mlp_dim=mlp_dim,
             dropout=dropout,
             use_flash_attn=use_flash_attn,
             return_last_block_attn=return_cls_attn,
         )
 
-        self.unflatten_attn = Rearrange(
-            "b heads (fq nq) (fk nk) -> b heads fq nq fk nk", fq=frames, fk=frames
-        )
-        self.unflatten_t1_out = Rearrange("b (f n) e -> b f n e", f=frames)
+        self.unflatten_attn = Rearrange("(b f) h t t -> b f h t t", f=frames)
+        self.unflatten_frames = Rearrange("(b f) n e -> b f n e", f=frames)
+        self.temporal_pos_enc = nn.Parameter(torch.randn(1, frames + 1, dim))
 
-        self.t2 = Transformer(
+        self.temporal_transformer = Transformer(
             dim=dim,
-            depth=depth2,
-            heads=heads2,
-            dim_head=dim_head2,
-            mlp_dim=mlp_dim2,
+            depth=temporal_depth,
+            heads=temporal_heads,
+            dim_head=dim_head,
+            mlp_dim=mlp_dim,
             dropout=dropout,
             use_flash_attn=use_flash_attn,
             return_last_block_attn=False,  # [CLS] vs patch attention only exists in first transformer's attention layers
@@ -362,30 +365,31 @@ class HierarchicalViT(nn.Module):
         """
         B, F, C, H, W = x.shape
 
-        # N = H / PH * W / PW * C, the number of patches
-        x = self.patch_emb(x)  # (B, F, N, E)
-        cls_tokens = self.cls_token.expand(B, F, 1, -1)
-        x = torch.cat((cls_tokens, x), dim=2)  # (B, F, N + 1, E)
-        x = x + self.pos_enc  # (B, F, N + 1, E)
-        x = self.flatten_frames(x)  # (B, F * (N + 1), E)
+        # T = H / PH * W / PW * C, the number of patches/tokens
+        x = self.patch_emb(x)  # (B, F, T, E)
+        spatial_cls_tokens = self.spatial_cls_token.expand(B, F, 1, -1)
+        x = torch.cat((spatial_cls_tokens, x), dim=2)  # (B, F, T + 1, E)
+        x = x + self.spatial_pos_enc  # (B, F, T + 1, E)
+        x = self.flatten_frames(x)  # (B * F, T + 1, E)
 
-        x, last_block_attn = self.t1(
+        x, last_block_attn = self.spatial_transformer(
             x
-        )  # x: (B, F * (N + 1), E), last_block_attn: (B, Heads, F * (N + 1), F * (N + 1))
+        )  # x: (B * F, T + 1, E), last_block_attn: (B * F, SpatialHeads, T + 1, T + 1)
 
         cls_attn = self.unflatten_attn(
             last_block_attn
-        )  # (B, Heads, F, N + 1, F, N + 1)
-        cls_attn = cls_attn[:, :, :, 0, :, :]  # (B, Heads, F, F, N + 1)
-        cls_attn = cls_attn[:, :, :, :, 1:]  # (B, Heads, F, F, N)
-        cls_attn = cls_attn.diagonal(dim1=2, dim2=3)  # (B, Heads, N, F)
-        cls_attn = cls_attn.permute(0, 1, 3, 2)  # (B, Heads, F, N)
+        )  # (B, F, SpatialHeads, T + 1, T + 1)
+        cls_attn = cls_attn[:, :, :, 0, :]  # (B, F, SpatialHeads, T + 1)
+        cls_attn = cls_attn[:, :, :, 1:]  # (B, F, SpatialHeads, T)
 
-        x = self.unflatten_t1_out(x)  # (B, F, N + 1, E)
+        x = self.unflatten_frames(x)  # (B, F, T + 1, E)
         x = x[:, :, 0, :]  # (B, F, E)
+        temporal_cls_tokens = self.temporal_cls_token.expand(B, 1, -1)
+        x = torch.cat((temporal_cls_tokens, x), dim=1)  # (B, F + 1, E)
+        x = x + self.temporal_pos_enc  # (B, F + 1, E)
 
-        x, _ = self.t2(x)  # (B, F, E)
-        x = x.mean(dim=1)  # (B, E)
+        x, _ = self.temporal_transformer(x)  # (B, F + 1, E)
+        x = x[:, 0, :]  # (B, E)
+        x = self.l1(x)  # (B, n_classes)
 
-        x = self.l1(x)
         return x, cls_attn

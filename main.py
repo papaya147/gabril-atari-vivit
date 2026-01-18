@@ -1,4 +1,5 @@
 import gc
+import os
 import random
 from dataclasses import dataclass
 from typing import Tuple
@@ -178,6 +179,7 @@ def train(
         # checkpointing
         if e % 10 == 0:
             save_path = f"{args.save_folder}/{args.game}/{e}.pt"
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             print(f"Saving model {save_path}...")
             torch.save(model.state_dict(), save_path)
 

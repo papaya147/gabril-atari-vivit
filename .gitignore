@@ -3,3 +3,4 @@ atari-dataset
 models
 wandb
 logs
+__pycache__

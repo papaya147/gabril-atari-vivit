@@ -16,7 +16,7 @@ export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 module purge
 module load conda
 eval "$(conda shell.bash hook)"
-conda activate .venv
+conda activate /home1/adsrivat/.conda/envs/.venv
 
 # Since you ran 'wandb login' on the login node, it should work automatically.
 # However, if you get network errors, uncomment the line below:

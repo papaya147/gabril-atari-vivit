@@ -1,0 +1,28 @@
+#!/bin/bash
+#SBATCH --account=biyik_1165
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-task=v100:1
+#SBATCH --mem=32G
+#SBATCH --time=4:00:00
+#SBATCH --output=logs/slurm-%j.out
+
+cd $SLURM_SUBMIT_DIR
+
+export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+module purge
+module load conda
+eval "$(conda shell.bash hook)"
+conda activate .venv
+
+# Since you ran 'wandb login' on the login node, it should work automatically.
+# However, if you get network errors, uncomment the line below:
+# export WANDB_MODE=offline
+
+echo "Job started on $(hostname) at $(date)"
+nvidia-smi
+
+python main.py

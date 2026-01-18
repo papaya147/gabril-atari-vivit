@@ -1,10 +1,15 @@
 import math
+import os
 from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from numpy import dtype
+
+
+def list_games(path: str) -> List[str]:
+    return [entry.name for entry in os.scandir(path) if entry.is_dir()]
 
 
 def break_episodes(
@@ -101,10 +106,17 @@ def stack_observations_and_gaze_coords(
     )
 
 
-def atari(game: str, device: str) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    dataset = torch.load(
-        f"atari-dataset/{game}/num_episodes_20_fs4_human.pt", weights_only=False
-    )
+def load_data(
+    path: str, device: str
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Load Atari data for training and testing.
+
+    :param path: The path of the Atari game dataset.
+    :param device: The device to use.
+    :return: (B, F, C, H, W), (B, F, layers, 2), (B)
+    """
+    dataset = torch.load(path, weights_only=False)
 
     observations = torch.from_numpy(dataset["observations"]).to(
         dtype=torch.float, device=device

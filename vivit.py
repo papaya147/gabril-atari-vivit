@@ -341,8 +341,9 @@ class FactorizedViViT(nn.Module):
             return_last_block_attn=return_cls_attn,
         )
 
-        self.unflatten_attn = Rearrange("(b f) h t t -> b f h t t", f=frames)
+        self.unflatten_attn = Rearrange("(b f) h t1 t2 -> b f h t1 t2", f=frames)
         self.unflatten_frames = Rearrange("(b f) n e -> b f n e", f=frames)
+        self.temporal_cls_token = nn.Parameter(torch.zeros(1, dim))
         self.temporal_pos_enc = nn.Parameter(torch.randn(1, frames + 1, dim))
 
         self.temporal_transformer = Transformer(
@@ -361,7 +362,7 @@ class FactorizedViViT(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         :param x: (B, F, C, H, W)
-        :return: (B, num_classes), (B, Heads, F * N)
+        :return: (B, num_classes), (B, F, Heads, T)
         """
         B, F, C, H, W = x.shape
 

@@ -122,41 +122,38 @@ def patchify(gaze_mask: torch.Tensor, patch_size: Tuple[int, int]) -> torch.Tens
     return gaze_mask.view(*batch_shape, num_patches_h, num_patches_w, patch_h, patch_w)
 
 
-def plot_patches(patches: np.ndarray, spacing: int = 1):
+def plot_patches(patches: torch.Tensor, spacing: int = 1):
     """
-    Visualizes patches.
+    Visualizes patches using PyTorch operations.
 
-    Args:
-        patches: Shape (B, Grid_Rows, Grid_Cols, Ph, Pw)
-                 or    (Grid_Rows, Grid_Cols, Ph, Pw).
-        spacing: Spacing between patches in pixels.
+    :param patches: (Grid_Rows, Grid_Cols, Patch_H, Patch_W)
+    :param spacing: Spacing between patches in pixels.
     """
-    if len(patches.shape) == 5:
-        patches = patches[0]
+    if patches.ndim != 4:
+        raise ValueError(f"Patches must be 4D, got {patches.shape}")
 
-    # Unpack dimensions directly from the tensor
-    # Shape: (Grid_Rows, Grid_Cols, Patch_H, Patch_W)
+    patches = patches.detach().cpu()
+
     rows, cols, ph, pw = patches.shape
 
     full_h = (rows * ph) + ((rows - 1) * spacing)
     full_w = (cols * pw) + ((cols - 1) * spacing)
 
-    canvas = np.full((full_h, full_w), np.nan)
+    canvas = torch.full((full_h, full_w), float("nan"), dtype=patches.dtype)
 
     for i in range(rows):
         for j in range(cols):
             y_start = i * (ph + spacing)
             x_start = j * (pw + spacing)
 
-            # Extract the specific patch
-            patch = patches[i, j]
-
-            canvas[y_start : y_start + ph, x_start : x_start + pw] = patch
+            canvas[y_start : y_start + ph, x_start : x_start + pw] = patches[i, j]
 
     plt.figure(figsize=(8, 8))
+
     cmap = plt.cm.hot
     cmap.set_bad(color="grey")
-    plt.imshow(canvas, cmap=cmap, interpolation="nearest")
+
+    plt.imshow(canvas.numpy(), cmap=cmap, interpolation="nearest")
     plt.axis("off")
     plt.title(f"Layout: {rows}x{cols} | Patch Size: {ph}x{pw}")
     plt.show()

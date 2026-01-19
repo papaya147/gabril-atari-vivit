@@ -4,50 +4,52 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-
-def gaussian_mask(
-    gaze: torch.Tensor, sigma: float, shape: Tuple[int, int]
-) -> torch.Tensor:
-    """
-    Generates a single 2D Gaussian mask for a specific gaze point.
-
-    :param gaze: (2). Coordinates of gaze point (normalized 0-1).
-    :param sigma: Standard deviation (spread) of the Gaussian.
-    :param shape: (height, width) of the output mask.
-    :return: torch.Tensor: A 2D tensor of the specified shape.
-    """
-    h, w = shape
-    device = gaze.device
-
-    x0, y0 = gaze
-
-    x0 = x0 * w
-    y0 = y0 * h
-
-    x_grid = torch.arange(0, w, dtype=torch.float32, device=device)
-    y_grid = torch.arange(0, h, dtype=torch.float32, device=device)
-    x, y = torch.meshgrid(x_grid, y_grid, indexing="xy")
-
-    dist_sq = (x - x0) ** 2 + (y - y0) ** 2
-
-    mask = torch.exp(-dist_sq / (2.0 * sigma**2))
-
-    return mask
+# def gaussian_mask(
+#     gaze: torch.Tensor, sigma: float, shape: Tuple[int, int]
+# ) -> torch.Tensor:
+#     """
+#     Generates a single 2D Gaussian mask for a specific gaze point.
+#
+#     :param gaze: (2). Coordinates of gaze point (normalized 0-1).
+#     :param sigma: Standard deviation (spread) of the Gaussian.
+#     :param shape: (height, width) of the output mask.
+#     :return: torch.Tensor: A 2D tensor of the specified shape.
+#     """
+#     h, w = shape
+#     device = gaze.device
+#
+#     x0, y0 = gaze
+#
+#     x0 = x0 * w
+#     y0 = y0 * h
+#
+#     x_grid = torch.arange(0, w, dtype=torch.float32, device=device)
+#     y_grid = torch.arange(0, h, dtype=torch.float32, device=device)
+#     x, y = torch.meshgrid(x_grid, y_grid, indexing="xy")
+#
+#     dist_sq = (x - x0) ** 2 + (y - y0) ** 2
+#
+#     mask = torch.exp(-dist_sq / (2.0 * sigma**2))
+#
+#     return mask
 
 
 def decaying_gaussian_mask(
     gaze_coords: torch.Tensor,
-    sigma: float,
     shape: Tuple[int, int],
-    decay: float = 0.9,
+    sigma: float = 15,  # gamma in the paper
+    decay: float = 0.99,  # beta in the paper
+    alpha: float = 0.7,  # alpha in the paper
 ) -> torch.Tensor:
     """
-    Generates cumulative heatmaps for a batch of gaze sequences efficiently.
+    Generates cumulative heatmaps with coordinate smoothing (Alpha) and
+    temporal decay (Beta).
 
-    :param gaze_coords: (..., layers, 2). Assumes the last dim is (x, y) and second-to-last is Time (Layers).
-    :param sigma: Spread of the gaussian.
+    :param gaze_coords: (..., layers, 2). Last dim is (x, y), 2nd-to-last is Time.
     :param shape: (height, width) of the image.
-    :param decay: Rate at which previous points fade.
+    :param sigma: Spread of the gaussian (Gamma).
+    :param decay: Rate at which previous mask fades (Beta).
+    :param alpha: Smoothing factor for coordinates (0 = no smoothing, 1 = static).
     :return: (..., height, width). Batch dims matching input.
     """
     H, W = shape
@@ -56,25 +58,38 @@ def decaying_gaussian_mask(
     batch_shape = gaze_coords.shape[:-2]
     layers = gaze_coords.shape[-2]
 
-    # flatten to (B, L, 2) for uniform processing
-    gaze_flat = gaze_coords.view(-1, layers, 2)
-    B, _, _ = gaze_flat.shape
+    gaze_flat = gaze_coords.view(-1, layers, 2).clone()
+    B, L, _ = gaze_flat.shape
+
+    # current = alpha * prev + (1 - alpha) * raw
+    if alpha > 0:
+        for t in range(1, L):
+            prev_coords = gaze_flat[:, t - 1, :]
+            curr_coords = gaze_flat[:, t, :]
+
+            prev_valid = ~torch.isnan(prev_coords).any(dim=1)
+            curr_valid = ~torch.isnan(curr_coords).any(dim=1)
+            should_smooth = prev_valid & curr_valid
+
+            if should_smooth.any():
+                gaze_flat[should_smooth, t, :] = (
+                    alpha * prev_coords[should_smooth]
+                    + (1 - alpha) * curr_coords[should_smooth]
+                )
 
     x_range = torch.arange(0, W, dtype=torch.float32, device=device)
     y_range = torch.arange(0, H, dtype=torch.float32, device=device)
     grid_x, grid_y = torch.meshgrid(x_range, y_range, indexing="xy")
 
-    grid_x = grid_x.unsqueeze(0)
-    grid_y = grid_y.unsqueeze(0)
+    grid_x = grid_x.unsqueeze(0)  # (1, H, W)
+    grid_y = grid_y.unsqueeze(0)  # (1, H, W)
 
     heatmap = torch.zeros((B, H, W), dtype=torch.float32, device=device)
-
     denom = 2.0 * sigma**2
 
     for i in range(layers):
         heatmap = heatmap * decay
 
-        # current gaze points for the entire batch
         current_points = gaze_flat[:, i, :]
 
         valid_mask = ~torch.isnan(current_points).any(dim=1)

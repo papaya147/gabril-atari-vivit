@@ -6,6 +6,7 @@ from typing import Tuple
 
 import ale_py
 import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn.functional as Fn
 import torch.optim as optim
@@ -35,6 +36,8 @@ class Config:
     atari_dataset_folder: str = "../atari-dataset"
     use_plots: bool = False
     save_folder: str = "./models"
+    version: int = 1
+    seed: int = 42
 
     # gaze
     gaze_sigma: int = 5
@@ -285,7 +288,7 @@ def train(
         project="ViViT-Atari",
         config=args.__dict__,
         group=group_id,
-        name=f"{args.game}-v3",
+        name=f"{args.game}-v{args.version}",
         job_type="train",
         id=wandb_id,
         resume="allow",
@@ -459,8 +462,21 @@ def preprocess(
     return aug_observations, gaze_mask_patches
 
 
+def set_seed(seed: int):
+    """
+    Sets the seed for all sources of randomness.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
+
 def main():
     args = Config()
+
+    set_seed(args.seed)
 
     if len(sys.argv) > 1:
         args.game_index = int(sys.argv[1])

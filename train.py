@@ -51,13 +51,13 @@ class Config:
     # transformer arch
     spatial_patch_size: Tuple[int, int] = (6, 6)
     embedding_dim: int = 256
-    spatial_depth: int = 4
-    temporal_depth: int = 4
+    spatial_depth: int = 3
+    temporal_depth: int = 2
     spatial_heads: int = 8
     temporal_heads: int = 8
     inner_dim: int = 64
     mlp_dim: int = 256
-    dropout: float = 0.0
+    dropout: float = 0.1
 
     # hyperparams
     learning_rate: float = 1e-4
@@ -256,21 +256,20 @@ def train(
         dropout=args.dropout,
         use_flash_attn=False,
         return_cls_attn=True,
-        use_temporal_mask=False,
+        use_temporal_mask=True,
     ).to(device=device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    # optimizer = optim.AdamW(
-    #     model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
-    # )
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-    #     optimizer,
-    #     mode="min",
-    #     factor=args.scheduler_factor,
-    #     patience=args.scheduler_patience,
-    # )
+    optimizer = optim.AdamW(
+        model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+    )
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=args.scheduler_factor,
+        patience=args.scheduler_patience,
+    )
 
     start_epoch, best_reward, wandb_id = load_checkpoint(
-        resume_path, model, optimizer, scheduler=None
+        resume_path, model, optimizer, scheduler
     )
 
     if wandb_id is None:
@@ -322,7 +321,7 @@ def train(
             pred_a, cls_attn = model(obs)
 
             # behavior cloning loss
-            policy_loss = Fn.cross_entropy(pred_a, a)  # weight=class_weights
+            policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
 
             # gaze loss
             cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
@@ -353,7 +352,7 @@ def train(
                 pred_a, cls_attn = model(obs)
 
                 # behavior cloning loss
-                policy_loss = Fn.cross_entropy(pred_a, a)  # weight=class_weights
+                policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
 
                 # gaze loss
                 cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
@@ -371,7 +370,7 @@ def train(
                 metrics["val_gaze_loss"] += gaze_loss.item() * curr_batch_size
                 metrics["val_acc"] += acc.item()
 
-        # scheduler.step(metrics["val_loss"])
+        scheduler.step(metrics["val_loss"])
 
         # testing
         mean_reward = test_agent(args, model)
@@ -392,7 +391,7 @@ def train(
             torch.save(model.state_dict(), save_path)
 
         save_checkpoint(
-            resume_path, e, best_reward, wandb_id, model, optimizer, scheduler=None
+            resume_path, e, best_reward, wandb_id, model, optimizer, scheduler
         )
 
     save_path = f"{args.save_folder}/{args.game}/final.pt"

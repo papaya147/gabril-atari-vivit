@@ -38,7 +38,7 @@ class Config:
 
     # gaze
     gaze_sigma: int = 5
-    gaze_beta: float = 0.99
+    gaze_beta: float = 0.9
     gaze_alpha: float = 0.7
 
     # augmentation
@@ -258,12 +258,12 @@ def train(
     optimizer = optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=args.scheduler_factor,
-        patience=args.scheduler_patience,
-    )
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer,
+    #     mode="min",
+    #     factor=args.scheduler_factor,
+    #     patience=args.scheduler_patience,
+    # )
 
     start_epoch, best_reward, wandb_id = load_checkpoint(
         resume_path, model, optimizer, scheduler=None
@@ -367,7 +367,7 @@ def train(
                 metrics["val_gaze_loss"] += gaze_loss.item() * curr_batch_size
                 metrics["val_acc"] += acc.item()
 
-        scheduler.step(metrics["val_loss"])
+        # scheduler.step(metrics["val_loss"])
 
         # testing
         mean_reward = test_agent(args, model)

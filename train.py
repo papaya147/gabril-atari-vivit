@@ -143,6 +143,67 @@ def test_agent(args: Config, model: torch.nn.Module) -> float:
     return total_reward / args.test_episodes
 
 
+def save_checkpoint(
+    path: str,
+    epoch: int,
+    best_reward: float,
+    wandb_id: str,
+    model: torch.nn.Module,
+    optimizer: optim.Optimizer,
+    scheduler: optim.lr_scheduler.ReduceLROnPlateau = None,
+):
+    """
+    Saves the complete training state to a file.
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    scheduler_state = None
+    if scheduler is not None:
+        scheduler_state = scheduler.state_dict()
+
+    checkpoint_data = {
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler_state,
+        "best_reward": best_reward,
+        "wandb_id": wandb_id,
+    }
+    torch.save(checkpoint_data, path)
+
+
+def load_checkpoint(
+    path: str,
+    model: torch.nn.Module,
+    optimizer: optim.Optimizer,
+    scheduler: optim.lr_scheduler.ReduceLROnPlateau = None,
+) -> Tuple[int, float, str | None]:
+    """
+    Attempts to load a checkpoint.
+    Returns: (start_epoch, best_reward, wandb_id)
+    If no checkpoint is found, returns defaults: (0, -inf, None)
+    """
+    if not os.path.exists(path):
+        return 0, -float("inf"), None
+
+    print(f"--> Found checkpoint! Resuming from {path}")
+    checkpoint = torch.load(path, map_location=device)
+
+    # Load states
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    if scheduler is not None:
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+    # Extract metadata
+    start_epoch = checkpoint["epoch"] + 1
+    best_reward = checkpoint.get("best_reward", -float("inf"))
+    wandb_id = checkpoint.get("wandb_id", None)
+
+    print(f"--> Resumed at Epoch {start_epoch}, Best Reward: {best_reward:.4f}")
+    return start_epoch, best_reward, wandb_id
+
+
 def train(
     args: Config,
     observations: torch.Tensor,
@@ -158,22 +219,7 @@ def train(
     :param actions: (B)
     :return:
     """
-    group_id = (
-        f"v1_"
-        f"lr{args.learning_rate:.0e}_"
-        f"lam{args.lambda_gaze}_"
-        f"dim{args.embedding_dim}_"
-        f"pt{args.spatial_patch_size[0]}_"
-        f"d{args.dropout}"
-    )
-    run = wandb.init(
-        entity="papaya147-ml",
-        project="ViViT-Atari",
-        config=args.__dict__,
-        group=group_id,
-        name=f"{args.game}-v3",
-        job_type="train",
-    )
+    resume_path = f"{args.save_folder}/{args.game}/latest_checkpoint.pt"
 
     B, F, C, H, W = observations.shape
     n_actions = torch.max(actions).item() + 1
@@ -219,6 +265,32 @@ def train(
         patience=args.scheduler_patience,
     )
 
+    start_epoch, best_reward, wandb_id = load_checkpoint(
+        resume_path, model, optimizer, scheduler=None
+    )
+
+    if wandb_id is None:
+        wandb_id = wandb.util.generate_id()
+
+    group_id = (
+        f"v1_"
+        f"lr{args.learning_rate:.0e}_"
+        f"lam{args.lambda_gaze}_"
+        f"dim{args.embedding_dim}_"
+        f"pt{args.spatial_patch_size[0]}_"
+        f"d{args.dropout}"
+    )
+    run = wandb.init(
+        entity="papaya147-ml",
+        project="ViViT-Atari",
+        config=args.__dict__,
+        group=group_id,
+        name=f"{args.game}-v3",
+        job_type="train",
+        id=wandb_id,
+        resume="allow",
+    )
+
     dataset = TensorDataset(observations, gaze_masks, actions)
     train_size = int(args.train_pct * len(dataset))
     val_size = len(dataset) - train_size
@@ -226,9 +298,7 @@ def train(
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True)
 
-    best_reward = -float("inf")
-
-    for e in range(args.epochs):
+    for e in range(start_epoch, args.epochs):
         metrics = {
             "train_loss": 0,
             "train_policy_loss": 0,
@@ -311,18 +381,15 @@ def train(
 
         run.log(data=log_data)
 
-        # checkpointing
-        # if e % 10 == 0:
-        #     save_path = f"{args.save_folder}/{args.game}/{e}.pt"
-        #     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        #     print(f"Saving model {save_path}...")
-        #     torch.save(model.state_dict(), save_path)
-
         if mean_reward > best_reward:
             best_reward = mean_reward
             save_path = f"{args.save_folder}/{args.game}/best_reward.pt"
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             torch.save(model.state_dict(), save_path)
+
+        save_checkpoint(
+            resume_path, e, best_reward, wandb_id, model, optimizer, scheduler=None
+        )
 
     save_path = f"{args.save_folder}/{args.game}/final.pt"
     torch.save(model.state_dict(), save_path)

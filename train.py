@@ -16,6 +16,7 @@ from gymnasium.wrappers import (
     GrayscaleObservation,
     ResizeObservation,
 )
+from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
 import atari
@@ -261,6 +262,7 @@ def train(
     optimizer = optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
+    scaler = GradScaler()
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="min",
@@ -298,8 +300,21 @@ def train(
     train_size = int(args.train_pct * len(dataset))
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+    )
 
     for e in range(start_epoch, args.epochs):
         metrics = {
@@ -318,21 +333,25 @@ def train(
         for obs, g, a in train_loader:
             obs, g = preprocess(args, obs, g)
             a = a.to(device=device)
-            pred_a, cls_attn = model(obs)
-
-            # behavior cloning loss
-            policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
-
-            # gaze loss
-            cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
-            gaze_loss = torch.norm(cls_attn - g, p="fro", dim=(1, 2)) ** 2
-            gaze_loss = gaze_loss.mean()
-
-            loss = policy_loss + args.lambda_gaze * gaze_loss
 
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+
+            with autocast(device_type="cuda", dtype=torch.float16):
+                pred_a, cls_attn = model(obs)
+
+                # behavior cloning loss
+                policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
+
+                # gaze loss
+                cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
+                gaze_loss = torch.norm(cls_attn - g, p="fro", dim=(1, 2)) ** 2
+                gaze_loss = gaze_loss.mean()
+
+                loss = policy_loss + args.lambda_gaze * gaze_loss
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             acc = (pred_a.argmax(dim=1) == a).float().sum()
 
@@ -349,17 +368,19 @@ def train(
             for obs, g, a in val_loader:
                 obs, g = preprocess(args, obs, g, augment=False)
                 a = a.to(device=device)
-                pred_a, cls_attn = model(obs)
 
-                # behavior cloning loss
-                policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
+                with autocast(device_type="cuda", dtype=torch.float16):
+                    pred_a, cls_attn = model(obs)
 
-                # gaze loss
-                cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
-                gaze_loss = torch.norm(cls_attn - g, p="fro", dim=(1, 2)) ** 2
-                gaze_loss = gaze_loss.mean()
+                    # behavior cloning loss
+                    policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
 
-                loss = policy_loss + args.lambda_gaze * gaze_loss
+                    # gaze loss
+                    cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
+                    gaze_loss = torch.norm(cls_attn - g, p="fro", dim=(1, 2)) ** 2
+                    gaze_loss = gaze_loss.mean()
+
+                    loss = policy_loss + args.lambda_gaze * gaze_loss
 
                 acc = (pred_a.argmax(dim=1) == a).float().sum()
 

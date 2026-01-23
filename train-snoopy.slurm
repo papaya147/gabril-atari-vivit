@@ -1,17 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=vivit_v2=3_train
+#SBATCH --job-name=vivit_v1_train
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
 
 # --- RESOURCE REQUESTS ---
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=12
 #SBATCH --mem=48G
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 
 # --- SHARDING CONFIGURATION ---
-#SBATCH --gres=gpu:1
+#SBATCH --gres=shard:10
 
 # --- THE ARRAY CONTROLLER ---
 #SBATCH --array=0-14%4

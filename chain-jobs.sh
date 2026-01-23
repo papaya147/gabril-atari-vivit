@@ -4,7 +4,7 @@
 JOB_SCRIPT="train-carc.slurm"
 
 # How many jobs to chain
-NUM_JOBS=2
+NUM_JOBS=5
 
 echo "Submitting Job 1..."
 JOB_ID=$(sbatch --parsable $JOB_SCRIPT)

@@ -67,7 +67,7 @@ class Config:
     epochs: int = 1000
     train_pct: float = 0.8
     batch_size: int = 32
-    lambda_gaze: float = 1.0
+    lambda_gaze: float = 10.0
     weight_decay: float = 0.1
     scheduler_factor: float = 0.5
     scheduler_patience: int = 5

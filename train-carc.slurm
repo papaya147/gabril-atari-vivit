@@ -7,7 +7,7 @@
 #SBATCH --gpus-per-task=1
 #SBATCH --constraint="a100|l40s|v100"
 #SBATCH --mem=48G
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --array=0-14
 #SBATCH --output=logs/%x-%A_%a.out
 

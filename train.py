@@ -213,7 +213,8 @@ def load_checkpoint(
     if "rng_states" in checkpoint:
         rng = checkpoint["rng_states"]
         torch.set_rng_state(rng["torch"].cpu())
-        torch.cuda.set_rng_state_all(rng["cuda"])
+        cuda_states = [state.cpu() for state in rng["cuda"]]
+        torch.cuda.set_rng_state_all(cuda_states)
         np.random.set_state(rng["numpy"])
         random.setstate(rng["python"])
 

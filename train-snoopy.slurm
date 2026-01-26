@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=vivit_v1_train
+#SBATCH --job-name=vivit_train
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
 
@@ -14,7 +14,7 @@
 #SBATCH --gres=shard:12
 
 # --- THE ARRAY CONTROLLER ---
-#SBATCH --array=0-14%7
+#SBATCH --array=0-0
 
 # --- SETUP ---
 source /scr/adsrivat/gabril-atari-vivit/.venv/bin/activate

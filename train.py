@@ -37,7 +37,7 @@ class Config:
     # paths and flags
     game_index: int = 0
     game: str = ""
-    atari_dataset_folder: str = "./atari-dataset"
+    atari_dataset_folder: str = "../atari-dataset"
     use_plots: bool = False
     save_folder: str = "./models"
     version: int = 3

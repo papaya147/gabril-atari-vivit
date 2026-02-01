@@ -8,7 +8,9 @@ from typing import Tuple
 
 import albumentations as A
 import ale_py
+import cv2
 import gymnasium as gym
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as Fn
@@ -183,8 +185,8 @@ def test_agent(
             ep_reward += reward
 
             color_obs = env.render()
-            color_obs = np.resize(color_obs, (H, W, 3))
-            color_obs = color_obs.reshape((3, H, W))
+            color_obs = cv2.resize(color_obs, (H, W))
+            color_obs = color_obs.transpose(2, 0, 1)
 
             rollout_obs.append(color_obs)
             rollout_g.append(cls_attn[-1])
@@ -201,8 +203,21 @@ def test_agent(
     mean_return = total_return / args.test_episodes
 
     best_rollout_obs = np.stack(best_rollout_obs)
-    best_rollout_g = np.stack(best_rollout_g)[:, np.newaxis, :, :]
-    best_rollout_g = np.repeat(best_rollout_g, 3, axis=1)
+
+    best_rollout_g = np.stack(best_rollout_g)
+
+    g_min = best_rollout_g.min()
+    g_max = best_rollout_g.max()
+    if g_max - g_min > 1e-8:
+        best_rollout_g = (best_rollout_g - g_min) / (g_max - g_min)
+    else:
+        best_rollout_g = best_rollout_g
+
+    cmap = plt.get_cmap("viridis")
+    best_rollout_g = cmap(best_rollout_g)
+    best_rollout_g = best_rollout_g[..., :3]
+    best_rollout_g = (best_rollout_g * 255).astype(np.uint8)
+    best_rollout_g = np.transpose(best_rollout_g, (0, 3, 1, 2))
 
     return mean_return, best_rollout_obs, best_rollout_g
 

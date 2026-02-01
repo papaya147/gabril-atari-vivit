@@ -196,11 +196,15 @@ def test_agent(
 
     mean_return = total_return / args.test_episodes
 
-    return (
-        mean_return,
-        np.stack(best_rollout_obs)[:, np.newaxis, :, :],
-        np.stack(best_rollout_g)[:, np.newaxis, :, :],
-    )
+    # adding color channel
+    best_rollout_obs = np.stack(best_rollout_obs)[:, np.newaxis, :, :]
+    best_rollout_g = np.stack(best_rollout_g)[:, np.newaxis, :, :]
+
+    # repeating color channel
+    best_rollout_obs = np.repeat(best_rollout_obs, 3, axis=1)
+    best_rollout_g = np.repeat(best_rollout_g, 3, axis=1)
+
+    return mean_return, best_rollout_obs, best_rollout_g
 
 
 def save_checkpoint(

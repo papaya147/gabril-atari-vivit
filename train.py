@@ -176,7 +176,7 @@ def test_agent(
                     align_corners=False,
                 )  # (1, F, H, W)
                 cls_attn = cls_attn / cls_attn.sum(dim=(-1, -2), keepdim=True)
-                cls_attn = cls_attn.squeeze().numpy()
+                cls_attn = cls_attn.squeeze().cpu().numpy()
 
             obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated

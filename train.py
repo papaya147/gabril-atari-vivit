@@ -112,7 +112,9 @@ GYM_ENV_MAP = {
 }
 
 
-def test_agent(args: Config, model: torch.nn.Module) -> float:
+def test_agent(
+    args: Config, model: torch.nn.Module
+) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     Runs the model in the actual Gym environment to measure performance.
     """
@@ -131,7 +133,10 @@ def test_agent(args: Config, model: torch.nn.Module) -> float:
     if "FIRE" in action_meanings:
         fire_a = action_meanings.index("FIRE")
 
-    total_reward = 0
+    total_return = 0
+    best_return = -1
+    best_rollout_obs = []
+    best_rollout_g = []
 
     model.eval()
     for i in range(args.test_episodes):
@@ -143,6 +148,8 @@ def test_agent(args: Config, model: torch.nn.Module) -> float:
         if fire_a != -1:
             obs, _, _, _, _ = env.step(fire_a)
 
+        rollout_obs = []
+        rollout_g = []
         while not done and steps < args.max_episode_length:
             steps += 1
 
@@ -151,18 +158,49 @@ def test_agent(args: Config, model: torch.nn.Module) -> float:
             obs = obs.view(1, F, 1, H, W).to(device=device)
 
             with torch.no_grad():
-                pred_a, _ = model(obs)
+                pred_a, cls_attn = model(obs)
+
                 action = pred_a.argmax(dim=1).item()
+
+                cls_attn = cls_attn.mean(dim=2)
+                cls_attn = cls_attn.view(
+                    -1,
+                    F,
+                    H // args.spatial_patch_size[0],
+                    W // args.spatial_patch_size[1],
+                )  # (1, F, H / PH, W / PW)
+                cls_attn = Fn.interpolate(
+                    cls_attn,
+                    size=(H, W),
+                    mode="bilinear",
+                    align_corners=False,
+                )  # (1, F, H, W)
+                cls_attn = cls_attn / cls_attn.sum(dim=(-1, -2), keepdim=True)
+                cls_attn = cls_attn.squeeze().numpy()
 
             obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             ep_reward += reward
 
-        total_reward += ep_reward
+            rollout_obs.append(obs[-1])
+            rollout_g.append(cls_attn[-1])
+
+        total_return += ep_reward
+
+        if ep_reward > best_return:
+            best_return = ep_reward
+            best_rollout_obs = rollout_obs
+            best_rollout_g = rollout_g
 
     env.close()
 
-    return total_reward / args.test_episodes
+    mean_return = total_return / args.test_episodes
+
+    return (
+        mean_return,
+        np.stack(best_rollout_obs)[:, np.newaxis, :, :],
+        np.stack(best_rollout_g)[:, np.newaxis, :, :],
+    )
 
 
 def save_checkpoint(
@@ -485,7 +523,7 @@ def train(
                     metrics["val_acc"] += acc.item()
 
             # testing
-            mean_reward = test_agent(args, model)
+            mean_reward, best_rollout_obs, best_rollout_g = test_agent(args, model)
 
             if mean_reward > best_reward:
                 best_reward = mean_reward
@@ -502,6 +540,12 @@ def train(
         log_data["epoch"] = e
         if mean_reward != -1:
             log_data["mean_reward"] = mean_reward
+            log_data["best_rollout_obs"] = wandb.Video(
+                best_rollout_obs, fps=4, format="gif"
+            )
+            log_data["best_rollout_g"] = wandb.Video(
+                best_rollout_g, fps=4, format="gif"
+            )
         log_data["learning_rate"] = optimizer.param_groups[0]["lr"]
 
         run.log(data=log_data)

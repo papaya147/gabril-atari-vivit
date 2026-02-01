@@ -201,7 +201,8 @@ def test_agent(
     mean_return = total_return / args.test_episodes
 
     best_rollout_obs = np.stack(best_rollout_obs)
-    best_rollout_g = np.stack(best_rollout_g)
+    best_rollout_g = np.stack(best_rollout_g)[:, np.newaxis, :, :]
+    best_rollout_g = np.repeat(best_rollout_g, 3, axis=1)
 
     return mean_return, best_rollout_obs, best_rollout_g
 

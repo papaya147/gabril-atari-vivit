@@ -182,7 +182,11 @@ def test_agent(
             done = terminated or truncated
             ep_reward += reward
 
-            rollout_obs.append(obs[-1])
+            color_obs = env.render()
+            color_obs = np.resize(color_obs, (H, W, 3))
+            color_obs = color_obs.reshape((3, H, W))
+
+            rollout_obs.append(color_obs)
             rollout_g.append(cls_attn[-1])
 
         total_return += ep_reward
@@ -196,13 +200,8 @@ def test_agent(
 
     mean_return = total_return / args.test_episodes
 
-    # adding color channel
-    best_rollout_obs = np.stack(best_rollout_obs)[:, np.newaxis, :, :]
-    best_rollout_g = np.stack(best_rollout_g)[:, np.newaxis, :, :]
-
-    # repeating color channel
-    best_rollout_obs = np.repeat(best_rollout_obs, 3, axis=1)
-    best_rollout_g = np.repeat(best_rollout_g, 3, axis=1)
+    best_rollout_obs = np.stack(best_rollout_obs)
+    best_rollout_g = np.stack(best_rollout_g)
 
     return mean_return, best_rollout_obs, best_rollout_g
 

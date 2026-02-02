@@ -6,7 +6,6 @@ import sys
 from dataclasses import dataclass
 from typing import Tuple
 
-import albumentations as A
 import ale_py
 import cv2
 import gymnasium as gym
@@ -16,17 +15,13 @@ import torch
 import torch.nn.functional as Fn
 import torch.optim as optim
 import wandb
-from gymnasium.wrappers import (
-    FrameStackObservation,
-    GrayscaleObservation,
-    ResizeObservation,
-)
 from torch.amp import GradScaler, autocast
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader, TensorDataset
 
 import dataset
+import env_manager
 import gaze
 from augmentation import Augment
 from device import device
@@ -120,20 +115,16 @@ def test_agent(
     """
     Runs the model in the actual Gym environment to measure performance.
     """
-    env_name = GYM_ENV_MAP.get(args.game)
-    if env_name is None:
-        print(f"Warning: No Gym environment found for '{args.game}' in GYM_ENV_MAP.")
-        return 0.0
+    start_fire = args.game in ["Breakout"]
 
-    env = gym.make(env_name, render_mode="rgb_array")
-    env = ResizeObservation(env, (84, 84))
-    env = GrayscaleObservation(env, keep_dim=False)
-    env = FrameStackObservation(env, 4)
-
-    action_meanings = env.unwrapped.get_action_meanings()
-    fire_a = -1
-    if "FIRE" in action_meanings:
-        fire_a = action_meanings.index("FIRE")
+    env = env_manager.create_env(
+        env_name=args.game,
+        noop_max=0,
+        frame_skip=args.frame_stack,
+        obs_size=84,
+        action_repeat_probability=0.25,
+        num_stack=args.frame_stack,
+    )
 
     total_return = 0
     best_return = -1
@@ -147,15 +138,12 @@ def test_agent(
         ep_reward = 0
         steps = 0
 
-        if fire_a != -1:
-            obs, _, _, _, _ = env.step(fire_a)
-
         rollout_obs = []
         rollout_g = []
         while not done and steps < args.max_episode_length:
             steps += 1
 
-            obs = torch.from_numpy(obs).float() / 255.0
+            obs = torch.from_numpy(np.array(obs)).float() / 255.0
             F, H, W = obs.shape
             obs = obs.view(1, F, 1, H, W).to(device=device)
 

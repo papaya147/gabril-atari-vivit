@@ -90,25 +90,6 @@ class Config:
     max_episode_length: int = 5000
 
 
-GYM_ENV_MAP = {
-    "Alien": "AlienNoFrameskip-v4",
-    "Assault": "AssaultNoFrameskip-v4",
-    "Asterix": "AsterixNoFrameskip-v4",
-    "Breakout": "BreakoutNoFrameskip-v4",
-    "ChopperCommand": "ChopperCommandNoFrameskip-v4",
-    "DemonAttack": "DemonAttackNoFrameskip-v4",
-    "Enduro": "EnduroNoFrameskip-v4",
-    "Freeway": "FreewayNoFrameskip-v4",
-    "Frostbite": "FrostbiteNoFrameskip-v4",
-    "MsPacman": "MsPacmanNoFrameskip-v4",
-    "Phoenix": "PhoenixNoFrameskip-v4",
-    "Qbert": "QbertNoFrameskip-v4",
-    "RoadRunner": "RoadRunnerNoFrameskip-v4",
-    "Seaquest": "SeaquestNoFrameskip-v4",
-    "UpNDown": "UpNDownNoFrameskip-v4",
-}
-
-
 def test_agent(
     args: Config, model: torch.nn.Module
 ) -> Tuple[float, np.ndarray, np.ndarray]:
@@ -194,12 +175,12 @@ def test_agent(
 
     best_rollout_g = np.stack(best_rollout_g)
 
-    g_min = best_rollout_g.min()
-    g_max = best_rollout_g.max()
-    if g_max - g_min > 1e-8:
-        best_rollout_g = (best_rollout_g - g_min) / (g_max - g_min)
-    else:
-        best_rollout_g = best_rollout_g
+    g_min = best_rollout_g.min(axis=(1, 2), keepdims=True)
+    g_max = best_rollout_g.max(axis=(1, 2), keepdims=True)
+    denominator = g_max - g_min
+    denominator[denominator < 1e-8] = 1.0
+    best_rollout_g = (best_rollout_g - g_min) / denominator
+    best_rollout_g = np.power(best_rollout_g, 0.5)  # optional
 
     cmap = plt.get_cmap("viridis")
     best_rollout_g = cmap(best_rollout_g)

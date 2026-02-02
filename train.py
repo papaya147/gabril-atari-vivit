@@ -105,6 +105,7 @@ def test_agent(
         obs_size=84,
         action_repeat_probability=0.25,
         num_stack=args.frame_stack,
+        start_fire=start_fire,
     )
 
     total_return = 0
@@ -123,6 +124,10 @@ def test_agent(
         rollout_g = []
         while not done and steps < args.max_episode_length:
             steps += 1
+
+            color_obs = env.render()
+            color_obs = cv2.resize(color_obs, (H, W))
+            color_obs = color_obs.transpose(2, 0, 1)
 
             obs = torch.from_numpy(np.array(obs)).float() / 255.0
             F, H, W = obs.shape
@@ -152,10 +157,6 @@ def test_agent(
             obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             ep_reward += reward
-
-            color_obs = env.render()
-            color_obs = cv2.resize(color_obs, (H, W))
-            color_obs = color_obs.transpose(2, 0, 1)
 
             rollout_obs.append(color_obs)
             rollout_g.append(cls_attn[-1])
@@ -529,10 +530,10 @@ def train(
         if mean_reward != -1:
             log_data["mean_reward"] = mean_reward
             log_data["best_rollout_obs"] = wandb.Video(
-                best_rollout_obs, fps=30, format="gif"
+                best_rollout_obs, fps=60, format="gif"
             )
             log_data["best_rollout_g"] = wandb.Video(
-                best_rollout_g, fps=30, format="gif"
+                best_rollout_g, fps=60, format="gif"
             )
         log_data["learning_rate"] = optimizer.param_groups[0]["lr"]
 

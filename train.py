@@ -125,13 +125,13 @@ def test_agent(
         while not done and steps < args.max_episode_length:
             steps += 1
 
-            color_obs = env.render()
-            color_obs = cv2.resize(color_obs, (H, W))
-            color_obs = color_obs.transpose(2, 0, 1)
-
             obs = torch.from_numpy(np.array(obs)).float() / 255.0
             F, H, W = obs.shape
             obs = obs.view(1, F, 1, H, W).to(device=device)
+
+            color_obs = env.render()
+            color_obs = cv2.resize(color_obs, (H, W))
+            color_obs = color_obs.transpose(2, 0, 1)
 
             with torch.no_grad():
                 pred_a, cls_attn = model(obs)

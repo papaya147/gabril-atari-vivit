@@ -92,7 +92,7 @@ class Config:
 
 def test_agent(
     args: Config, model: torch.nn.Module
-) -> Tuple[float, np.ndarray, np.ndarray]:
+) -> Tuple[float, float, np.ndarray, np.ndarray]:
     """
     Runs the model in the actual Gym environment to measure performance.
     """
@@ -108,7 +108,7 @@ def test_agent(
         start_fire=start_fire,
     )
 
-    total_return = 0
+    ep_returns = []
     best_return = -1
     best_rollout_obs = []
     best_rollout_g = []
@@ -161,7 +161,7 @@ def test_agent(
             rollout_obs.append(color_obs)
             rollout_g.append(cls_attn[-1])
 
-        total_return += ep_reward
+        ep_returns.append(ep_reward)
 
         if ep_reward > best_return:
             best_return = ep_reward
@@ -170,7 +170,11 @@ def test_agent(
 
     env.close()
 
-    mean_return = total_return / args.test_episodes
+    ep_returns = np.array(ep_returns)
+
+    mean_return = float(ep_returns.mean())
+
+    std_return = float(ep_returns.std())
 
     best_rollout_obs = np.stack(best_rollout_obs)
 
@@ -189,7 +193,7 @@ def test_agent(
     best_rollout_g = (best_rollout_g * 255).astype(np.uint8)
     best_rollout_g = np.transpose(best_rollout_g, (0, 3, 1, 2))
 
-    return mean_return, best_rollout_obs, best_rollout_g
+    return mean_return, std_return, best_rollout_obs, best_rollout_g
 
 
 def save_checkpoint(
@@ -512,7 +516,9 @@ def train(
                     metrics["val_acc"] += acc.item()
 
             # testing
-            mean_reward, best_rollout_obs, best_rollout_g = test_agent(args, model)
+            mean_reward, std_reward, best_rollout_obs, best_rollout_g = test_agent(
+                args, model
+            )
 
             if mean_reward > best_reward:
                 best_reward = mean_reward
@@ -529,6 +535,7 @@ def train(
         log_data["epoch"] = e
         if mean_reward != -1:
             log_data["mean_reward"] = mean_reward
+            log_data["std_reward"] = std_reward
             log_data["best_rollout_obs"] = wandb.Video(
                 best_rollout_obs, fps=60, format="gif"
             )

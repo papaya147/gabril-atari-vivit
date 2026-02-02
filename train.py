@@ -537,10 +537,10 @@ def train(
             log_data["mean_reward"] = mean_reward
             log_data["std_reward"] = std_reward
             log_data["best_rollout_obs"] = wandb.Video(
-                best_rollout_obs, fps=60, format="gif"
+                best_rollout_obs, fps=15, format="gif"
             )
             log_data["best_rollout_g"] = wandb.Video(
-                best_rollout_g, fps=60, format="gif"
+                best_rollout_g, fps=15, format="gif"
             )
         log_data["learning_rate"] = optimizer.param_groups[0]["lr"]
 

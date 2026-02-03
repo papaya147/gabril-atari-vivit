@@ -109,6 +109,7 @@ def test_agent(
     )
 
     ep_returns = []
+    ep_steps = []
     best_return = -1
     best_rollout_obs = []
     best_rollout_g = []

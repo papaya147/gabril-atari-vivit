@@ -72,7 +72,7 @@ class Config:
 
     # hyperparams
     learning_rate: float = 5e-4
-    epochs: int = 2000
+    epochs: int = 3000
     train_pct: float = 0.8
     batch_size: int = 32
     lambda_gaze: float = 0.1

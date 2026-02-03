@@ -118,7 +118,7 @@ class Augment:
                 crop,
                 light,
                 A.OneOf(
-                    [noise, pixel_drop, posterize, blur],
+                    [noise, posterize, blur],
                     p=p_spatial_corruption,
                 ),
             ],

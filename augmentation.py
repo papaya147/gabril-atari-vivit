@@ -76,8 +76,8 @@ class Augment:
 
         crop = A.Compose(
             [
-                A.Pad(padding=crop_padding, p=1.0),
-                A.RandomCrop(84, 84, p=1.0),
+                A.Pad(padding=crop_padding, p=1),
+                A.RandomCrop(84, 84, p=1),
             ],
             p=p_spatial_corruption,
         )
@@ -89,27 +89,22 @@ class Augment:
                         100 * (1 - light_intensity),
                         100 * (1 + light_intensity),
                     ),
-                    p=1.0,
+                    p=1,
                 ),
-                A.RandomBrightnessContrast(p=1.0),
+                A.RandomBrightnessContrast(p=1),
             ],
             p=p_spatial_corruption,
         )
 
-        noise = A.GaussNoise(std_range=(noise_std, noise_std), p=p_spatial_corruption)
+        noise = A.GaussNoise(std_range=(noise_std, noise_std), p=1)
 
-        pixel_drop = A.PixelDropout(
-            dropout_prob=p_pixel_dropout,
-            p=p_spatial_corruption,
-        )
+        pixel_drop = A.PixelDropout(dropout_prob=p_pixel_dropout, p=1)
 
-        posterize = A.Posterize(num_bits=posterize_bits, p=p_spatial_corruption)
+        posterize = A.Posterize(num_bits=posterize_bits, p=1)
 
-        blur = A.GaussianBlur(
-            blur_limit=(blur_pixels, blur_pixels), p=p_spatial_corruption
-        )
+        blur = A.GaussianBlur(blur_limit=(blur_pixels, blur_pixels), p=1)
 
-        frame_drop = A.Lambda(image=RandomFrameDropout(F), name="frame_drop", p=1.0)
+        frame_drop = A.Lambda(image=RandomFrameDropout(F), name="frame_drop", p=1)
 
         temporal_corruptions = [frame_drop]
 

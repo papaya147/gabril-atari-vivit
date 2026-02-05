@@ -59,20 +59,50 @@ class RandomFrameDropout:
         return ret_img
 
 
+class RandomCutout:
+    def __init__(self, f=4, hole_size=12):
+        self.f = f
+        self.hole_size = hole_size
+        self.current_idx = 0
+        self.target_idx = random.randint(0, self.f - 1)
+
+    def reset(self):
+        self.current_idx = 0
+        self.target_idx = random.randint(0, self.f - 1)
+
+    def __call__(self, image, **kwargs):
+        img = image.copy()
+
+        if self.current_idx == self.target_idx:
+            h, w, c = img.shape
+
+            y = random.randint(0, max(0, h - self.hole_size))
+            x = random.randint(0, max(0, w - self.hole_size))
+
+            cutout_h = random.randint(1, self.hole_size)
+            cutout_w = random.randint(1, self.hole_size)
+
+            if img.ndim == 3:
+                img[y : y + cutout_h, x : x + cutout_w, :] = 0
+            else:
+                img[y : y + cutout_h, x : x + cutout_w] = 0
+
+        self.current_idx += 1
+        if self.current_idx >= self.f:
+            self.reset()
+
+        return img
+
+
 class Augment:
     def __init__(
         self,
         frame_shape: Tuple[int, int, int, int],
         crop_padding: int,
-        light_intensity: float,
-        noise_std: float,
-        p_pixel_dropout: float,
-        posterize_bits: int,
-        blur_pixels: int,
+        cutout_hole_size: int,
         p_spatial_corruption: float,
-        p_temporal_corruption: float,
     ):
-        F, H, W, C = frame_shape
+        F, C, H, W = frame_shape
 
         crop = A.Compose(
             [
@@ -82,42 +112,42 @@ class Augment:
             p=p_spatial_corruption,
         )
 
-        light = A.Compose(
-            [
-                A.RandomGamma(
-                    gamma_limit=(
-                        100 * (1 - light_intensity),
-                        100 * (1 + light_intensity),
-                    ),
-                    p=1,
-                ),
-                A.RandomBrightnessContrast(p=1),
-            ],
+        cutout = A.Lambda(
+            image=RandomCutout(f=F, hole_size=cutout_hole_size),
+            name="cutout",
             p=p_spatial_corruption,
         )
 
-        noise = A.GaussNoise(std_range=(noise_std, noise_std), p=1)
+        # light = A.Compose(
+        #     [
+        #         A.RandomGamma(
+        #             gamma_limit=(
+        #                 100 * (1 - light_intensity),
+        #                 100 * (1 + light_intensity),
+        #             ),
+        #             p=1,
+        #         ),
+        #         A.RandomBrightnessContrast(p=1),
+        #     ],
+        #     p=p_spatial_corruption,
+        # )
+        #
+        # noise = A.GaussNoise(std_range=(noise_std, noise_std), p=1)
+        #
+        # pixel_drop = A.PixelDropout(dropout_prob=p_pixel_dropout, p=1)
+        #
+        # posterize = A.Posterize(num_bits=posterize_bits, p=1)
+        #
+        # blur = A.GaussianBlur(blur_limit=(blur_pixels, blur_pixels), p=1)
+        #
+        # frame_drop = A.Lambda(image=RandomFrameDropout(F), name="frame_drop", p=1)
+        #
+        # temporal_corruptions = [frame_drop]
 
-        pixel_drop = A.PixelDropout(dropout_prob=p_pixel_dropout, p=1)
-
-        posterize = A.Posterize(num_bits=posterize_bits, p=1)
-
-        blur = A.GaussianBlur(blur_limit=(blur_pixels, blur_pixels), p=1)
-
-        frame_drop = A.Lambda(image=RandomFrameDropout(F), name="frame_drop", p=1)
-
-        temporal_corruptions = [frame_drop]
-
-        self.augment = A.Compose(
-            [
-                crop,
-                light,
-                A.OneOf(
-                    [noise],
-                    p=p_spatial_corruption,
-                ),
-            ],
-        )
+        if F != 1:
+            self.augment = A.Compose([crop, cutout])
+        else:
+            self.augment = A.Compose([crop])
 
     def __call__(
         self, observations: torch.Tensor, gaze_masks: torch.Tensor, **kwargs

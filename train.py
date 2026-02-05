@@ -43,6 +43,7 @@ class Config:
     algorithm: str = "AuxGazeFactorizedViViT"
 
     frame_stack: int = 4
+    frame_skip: int = 4
 
     # gaze
     gaze_sigma: int = 15
@@ -51,6 +52,7 @@ class Config:
 
     # augmentation
     augment_crop_padding: int = 4
+    augment_cutout_hole_size: int = 12
     augment_light_intensity: float = 0.2
     augment_noise_std: float = 0.01
     augment_p_pixel_dropout: float = 0.01
@@ -101,7 +103,7 @@ def test_agent(
     env = env_manager.create_env(
         env_name=args.game,
         noop_max=0,
-        frame_skip=args.frame_stack,
+        frame_skip=args.frame_skip,
         obs_size=84,
         action_repeat_probability=0.25,
         num_stack=args.frame_stack,
@@ -610,13 +612,8 @@ def preprocess(
         augment = Augment(
             frame_shape=(F, C, H, W),
             crop_padding=args.augment_crop_padding,
-            light_intensity=args.augment_light_intensity,
-            noise_std=args.augment_noise_std,
-            p_pixel_dropout=args.augment_p_pixel_dropout,
-            posterize_bits=args.augment_posterize_bits,
-            blur_pixels=args.augment_blur_pixels,
+            cutout_hole_size=args.augment_cutout_hole_size,
             p_spatial_corruption=args.augment_p_spatial_corruptions,
-            p_temporal_corruption=args.augment_p_temporal_corruptions,
         )
         observations, gaze_masks = augment(observations, gaze_masks)
 

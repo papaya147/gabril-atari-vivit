@@ -63,21 +63,21 @@ class Config:
 
     # transformer arch
     spatial_patch_size: Tuple[int, int] = (6, 6)
-    embedding_dim: int = 64
-    spatial_depth: int = 3
+    embedding_dim: int = 256
+    spatial_depth: int = 4
     temporal_depth: int = 2
     spatial_heads: int = 4
     temporal_heads: int = 4
     inner_dim: int = 32
-    mlp_dim: int = 256
-    dropout: float = 0.25
+    mlp_dim: int = 512
+    dropout: float = 0.1
 
     # hyperparams
     learning_rate: float = 5e-4
-    epochs: int = 3000
-    train_pct: float = 0.8
+    epochs: int = 1000
+    train_pct: float = 0.95
     batch_size: int = 32
-    lambda_gaze: float = 0.1
+    lambda_gaze: float = 10
     weight_decay: float = 5e-2
     scheduler_factor: float = 0.5
     scheduler_patience: int = 5

@@ -31,9 +31,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-def test_agent(
-    model: torch.nn.Module,
-) -> Tuple[float, float, float, float, np.ndarray, np.ndarray]:
+def test_agent(model: torch.nn.Module):
     """
     Runs the model in the actual Gym environment to measure performance.
     """
@@ -130,11 +128,13 @@ def test_agent(
     denominator = g_max - g_min
     denominator[denominator < 1e-8] = 1.0
     best_rollout_g = (best_rollout_g - g_min) / denominator
-    best_rollout_g = np.power(best_rollout_g, 0.5)  # optional
 
+    best_rollout_overlaid = best_rollout_obs * np.expand_dims(best_rollout_g, axis=1)
+
+    best_rollout_g = np.power(best_rollout_g, 0.5)  # making colors brighter, optional
     cmap = plt.get_cmap("viridis")
     best_rollout_g = cmap(best_rollout_g)
-    best_rollout_g = best_rollout_g[..., :3]
+    best_rollout_g = best_rollout_g[..., :3]  # getting rid of alpha channel
     best_rollout_g = (best_rollout_g * 255).astype(np.uint8)
     best_rollout_g = np.transpose(best_rollout_g, (0, 3, 1, 2))
 
@@ -145,6 +145,7 @@ def test_agent(
         std_steps,
         best_rollout_obs,
         best_rollout_g,
+        best_rollout_overlaid,
     )
 
 
@@ -451,6 +452,9 @@ def train(
             )
             log_data["best_rollout_g"] = wandb.Video(
                 best_rollout_g, fps=15, format="gif"
+            )
+            log_data["best_rollout_overlaid"] = wandb.Video(
+                best_rollout_overlaid, fps=15, format="gif"
             )
         log_data["learning_rate"] = optimizer.param_groups[0]["lr"]
 

@@ -473,7 +473,6 @@ def preprocess(
     Augment the observations and gaze masks. # Convert the gaze masks into patches.
     Normalize the gaze patches.
 
-    :param args: Config.
     :param observations: (B, F, C, H, W)
     :param gaze_coords: (B, F, gaze_layers, 2)
     :param augment: Augment the data with random shifts, color jitter and noise?

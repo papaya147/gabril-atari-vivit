@@ -313,8 +313,8 @@ def train(
     run = wandb.init(
         entity="papaya147-ml",
         project="GABRIL-Atari-ViViT",
-        config=args.__dict__,
-        name=f"{args.algorithm}_GABRIL-Atari-{args.game}_bs={args.batch_size}_{date_str}",
+        config=config.__dict__,
+        name=f"{config.algorithm}_GABRIL-Atari-{config.game}_bs={config.batch_size}_{date_str}",
         job_type="train",
         id=wandb_id,
         resume="allow",

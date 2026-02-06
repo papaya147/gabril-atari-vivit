@@ -107,13 +107,13 @@ parser.add_argument("--dropout", type=float, default=0.1)
 
 # hyperparams
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
-parser.add_argument("--epochs", type=int, default=300)
+parser.add_argument("--epochs", type=int, default=500)
 parser.add_argument(
     "--train-pct", type=float, default=0.95, help="Percentage of data for training"
 )
 parser.add_argument("--batch-size", type=int, default=32)
 parser.add_argument(
-    "--lambda-gaze", type=float, default=0.1, help="Weight for gaze auxiliary loss"
+    "--lambda-gaze", type=float, default=10, help="Weight for gaze auxiliary loss"
 )
 parser.add_argument("--weight-decay", type=float, default=5e-2)
 parser.add_argument("--scheduler-factor", type=float, default=0.5)
@@ -124,7 +124,7 @@ parser.add_argument("--warmup-start-factor", type=float, default=1e-10)
 parser.add_argument("--min-lr", type=float, default=1e-6)
 
 # testing
-parser.add_argument("--n-tests", type=int, default=100)
+parser.add_argument("--n-tests", type=int, default=50)
 parser.add_argument("--test-episodes", type=int, default=10)
 parser.add_argument("--max-episode-length", type=int, default=5000)
 

@@ -1,9 +1,7 @@
 import datetime
-import math
 import os
 import random
 import sys
-from dataclasses import dataclass
 from typing import Tuple
 
 import ale_py
@@ -157,7 +155,7 @@ def calculate_loss(
     g: torch.Tensor,
     a: torch.Tensor,
 ):
-    with autocast(device_type="cuda", dtype=torch.float16):
+    with autocast(device_type=device, dtype=torch.float16):
         pred_a, cls_attn = model(
             obs
         )  # pred_a: (B, n_actions), cls_attn: (B, F, SpatialHeads, T)
@@ -211,14 +209,14 @@ def calculate_loss(
 
 def train(
     observations: torch.Tensor,
-    gaze_coords: torch.Tensor,
+    gaze_saliency_maps: torch.Tensor,
     actions: torch.Tensor,
 ):
     """
     Train a ViViT model.
 
     :param observations: (B, F, C, H, W)
-    :param gaze_coords: (B, F, layers, 2)
+    :param gaze_saliency_maps: (B, F, H, W)
     :param actions: (B)
     :return:
     """
@@ -325,7 +323,11 @@ def train(
     val_size = dataset_len - train_size
 
     train_obs, val_obs = observations[:train_size], observations[train_size:]
-    train_gaze, val_gaze = gaze_coords[:train_size], gaze_coords[train_size:]
+    # train_gaze, val_gaze = gaze_coords[:train_size], gaze_coords[train_size:]
+    train_gaze, val_gaze = (
+        gaze_saliency_maps[:train_size],
+        gaze_saliency_maps[train_size:],
+    )
     train_acts, val_acts = actions[:train_size], actions[train_size:]
 
     train_dataset = TensorDataset(train_obs, train_gaze, train_acts)
@@ -466,7 +468,7 @@ def train(
 
 def preprocess(
     observations: torch.Tensor,
-    gaze_coords: torch.Tensor,
+    gaze_masks: torch.Tensor,
     augment: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -474,20 +476,21 @@ def preprocess(
     Normalize the gaze patches.
 
     :param observations: (B, F, C, H, W)
-    :param gaze_coords: (B, F, gaze_layers, 2)
+    # :param gaze_coords: (B, F, gaze_layers, 2)
+    :param gaze_masks: (B, F, H, W)
     :param augment: Augment the data with random shifts, color jitter and noise?
     :return: (B, F, C, H, W), (B, F, H, W)
     """
     B, F, C, H, W = observations.shape
     random_example = random.randint(0, len(observations) - 1)
 
-    gaze_masks = gaze.decaying_gaussian_mask(
-        gaze_coords,
-        shape=(H, W),
-        base_sigma=config.gaze_sigma,
-        temporal_decay=config.gaze_alpha,
-        blur_growth=config.gaze_beta,
-    )  # (B, F, H, W)
+    # gaze_masks = gaze.decaying_gaussian_mask(
+    #     gaze_coords,
+    #     shape=(H, W),
+    #     base_sigma=config.gaze_sigma,
+    #     temporal_decay=config.gaze_alpha,
+    #     blur_growth=config.gaze_beta,
+    # )  # (B, F, H, W)
 
     # pre augmentation plots
     if config.use_plots:
@@ -551,14 +554,29 @@ def main():
     # config.game = "Alien"
     print(f"Game: {config.game}")
 
-    observations, gaze_coords, actions = dataset.load_data(
-        f"{config.atari_dataset_folder}/{config.game}",
-        frame_stack=config.frame_stack,
-        gaze_temporal_decay=config.gaze_alpha,
-        device="cpu",
+    # observations, gaze_coords, actions = dataset.load_data(
+    #     f"{config.atari_dataset_folder}/{config.game}",
+    #     frame_stack=config.frame_stack,
+    #     gaze_temporal_decay=config.gaze_alpha,
+    #     device="cpu",
+    # )
+
+    observations, actions, gaze_saliency_maps, gaze_coordinates = dataset.load_dataset(
+        env=config.game,
+        seed=config.seed,
+        datapath=config.atari_dataset_folder,
+        conf_type="normal",
+        conf_randomness=0,
+        stack=config.frame_stack,
+        num_episodes=dataset.MAX_EPISODES[config.game],
+        use_gaze=True,
+        gaze_mask_sigma=config.gaze_sigma,
+        gaze_mask_coef=config.gaze_alpha,
     )
 
-    train(observations, gaze_coords, actions)
+    observations = observations.float() / 255.0
+
+    train(observations.unsqueeze(2), gaze_saliency_maps, actions)
 
 
 if __name__ == "__main__":

@@ -20,10 +20,12 @@ from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader, TensorDataset
 
+import checkpoint
 import dataset
 import env_manager
 import gaze
 from augmentation import Augment
+from config import config
 from device import device
 from vivit import AuxGazeFactorizedViViT, FactorizedViViT
 
@@ -31,82 +33,21 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-@dataclass
-class Config:
-    # paths and flags
-    game_index: int = 0
-    game: str = ""
-    atari_dataset_folder: str = "../atari-dataset"
-    use_plots: bool = False
-    save_folder: str = "./models"
-    seed: int = 42
-    algorithm: str = "AuxGazeFactorizedViViT"
-
-    frame_stack: int = 4
-    frame_skip: int = 4
-
-    # gaze
-    gaze_sigma: int = 15
-    gaze_beta: float = 0.99
-    gaze_alpha: float = 0.7
-
-    # augmentation
-    augment_crop_padding: int = 4
-    augment_cutout_hole_size: int = 12
-    augment_light_intensity: float = 0.2
-    augment_noise_std: float = 0.01
-    augment_p_pixel_dropout: float = 0.01
-    augment_posterize_bits: int = 4
-    augment_blur_pixels: int = 2
-    augment_p_spatial_corruptions: float = 0.5
-    augment_p_temporal_corruptions: float = 0.25
-
-    # transformer arch
-    spatial_patch_size: Tuple[int, int] = (6, 6)
-    embedding_dim: int = 256
-    spatial_depth: int = 4
-    temporal_depth: int = 2
-    spatial_heads: int = 4
-    temporal_heads: int = 4
-    inner_dim: int = 32
-    mlp_dim: int = 512
-    dropout: float = 0.1
-
-    # hyperparams
-    learning_rate: float = 5e-4
-    epochs: int = 1000
-    train_pct: float = 0.95
-    batch_size: int = 32
-    lambda_gaze: float = 10
-    weight_decay: float = 5e-2
-    scheduler_factor: float = 0.5
-    scheduler_patience: int = 5
-    clip_grad_norm: float = 1.0
-    warmup_epochs: int = 100
-    warmup_start_factor: float = 1e-10
-    min_learning_rate: float = 1e-6
-
-    # testing
-    n_tests: int = 100
-    test_episodes: int = 10
-    max_episode_length: int = 5000
-
-
 def test_agent(
-    args: Config, model: torch.nn.Module
+    model: torch.nn.Module,
 ) -> Tuple[float, float, float, float, np.ndarray, np.ndarray]:
     """
     Runs the model in the actual Gym environment to measure performance.
     """
-    start_fire = args.game in ["Breakout"]
+    start_fire = config.game in ["Breakout"]
 
     env = env_manager.create_env(
-        env_name=args.game,
+        env_name=config.game,
         noop_max=0,
-        frame_skip=args.frame_skip,
+        frame_skip=config.frame_skip,
         obs_size=84,
         action_repeat_probability=0.25,
-        num_stack=args.frame_stack,
+        num_stack=config.frame_stack,
         start_fire=start_fire,
     )
 
@@ -117,7 +58,7 @@ def test_agent(
     best_rollout_g = []
 
     model.eval()
-    for i in range(args.test_episodes):
+    for i in range(config.test_episodes):
         obs, _ = env.reset()
         done = False
         ep_reward = 0
@@ -125,7 +66,7 @@ def test_agent(
 
         rollout_obs = []
         rollout_g = []
-        while not done and steps < args.max_episode_length:
+        while not done and steps < config.max_episode_length:
             steps += 1
 
             obs = torch.from_numpy(np.array(obs)).float() / 255.0
@@ -145,8 +86,8 @@ def test_agent(
                 cls_attn = cls_attn.view(
                     -1,
                     F,
-                    H // args.spatial_patch_size[0],
-                    W // args.spatial_patch_size[1],
+                    H // config.spatial_patch_size[0],
+                    W // config.spatial_patch_size[1],
                 )  # (1, F, H / PH, W / PW)
                 cls_attn = Fn.interpolate(
                     cls_attn,
@@ -209,82 +150,7 @@ def test_agent(
     )
 
 
-def save_checkpoint(
-    path: str,
-    epoch: int,
-    best_reward: float,
-    wandb_id: str,
-    model: torch.nn.Module,
-    optimizer: optim.Optimizer,
-    scaler: GradScaler,
-    scheduler: SequentialLR = None,
-):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    scheduler_state = None
-    if scheduler is not None:
-        scheduler_state = scheduler.state_dict()
-
-    checkpoint_data = {
-        "epoch": epoch,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "scheduler_state_dict": scheduler_state,
-        "scaler_state_dict": scaler.state_dict(),
-        "best_reward": best_reward,
-        "wandb_id": wandb_id,
-        "rng_states": {
-            "torch": torch.get_rng_state(),
-            "cuda": torch.cuda.get_rng_state_all(),
-            "numpy": np.random.get_state(),
-            "python": random.getstate(),
-        },
-    }
-    torch.save(checkpoint_data, path)
-
-
-def load_checkpoint(
-    path: str,
-    model: torch.nn.Module,
-    optimizer: optim.Optimizer,
-    scaler: GradScaler,
-    scheduler: SequentialLR = None,
-) -> Tuple[int, float, str | None]:
-    if not os.path.exists(path):
-        return 0, -float("inf"), None
-
-    print(f"--> Found checkpoint! Resuming from {path}")
-    checkpoint = torch.load(path, map_location=device, weights_only=False)
-
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
-    if "scaler_state_dict" in checkpoint:
-        scaler.load_state_dict(checkpoint["scaler_state_dict"])
-
-    if scheduler is not None:
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-
-    # Restore RNGs if available
-    if "rng_states" in checkpoint:
-        rng = checkpoint["rng_states"]
-        torch.set_rng_state(rng["torch"].cpu())
-        cuda_states = [state.cpu() for state in rng["cuda"]]
-        torch.cuda.set_rng_state_all(cuda_states)
-        np.random.set_state(rng["numpy"])
-        random.setstate(rng["python"])
-
-    # Extract metadata
-    start_epoch = checkpoint["epoch"] + 1
-    best_reward = checkpoint.get("best_reward", -float("inf"))
-    wandb_id = checkpoint.get("wandb_id", None)
-
-    print(f"--> Resumed at Epoch {start_epoch}, Best Reward: {best_reward:.4f}")
-    return start_epoch, best_reward, wandb_id
-
-
 def calculate_loss(
-    args: Config,
     model: torch.nn.Module,
     class_weights: torch.Tensor,
     obs: torch.Tensor,
@@ -305,7 +171,10 @@ def calculate_loss(
         cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
         _, F, _ = cls_attn.shape
         cls_attn = cls_attn.view(
-            -1, F, GH // args.spatial_patch_size[0], GW // args.spatial_patch_size[1]
+            -1,
+            F,
+            GH // config.spatial_patch_size[0],
+            GW // config.spatial_patch_size[1],
         )  # (B, F, H / PH, W / PW)
 
         cls_attn = Fn.interpolate(
@@ -341,7 +210,6 @@ def calculate_loss(
 
 
 def train(
-    args: Config,
     observations: torch.Tensor,
     gaze_coords: torch.Tensor,
     actions: torch.Tensor,
@@ -349,13 +217,12 @@ def train(
     """
     Train a ViViT model.
 
-    :param args: Config.
     :param observations: (B, F, C, H, W)
     :param gaze_coords: (B, F, layers, 2)
     :param actions: (B)
     :return:
     """
-    resume_path = f"{args.save_folder}/{args.game}/latest_checkpoint.pt"
+    resume_path = f"{config.save_folder}/{config.game}/latest_checkpoint.pt"
 
     B, F, C, H, W = observations.shape
     n_actions = torch.max(actions).item() + 1
@@ -373,48 +240,69 @@ def train(
     class_weights = torch.clamp(class_weights, min=1.0, max=10.0)
     class_weights = class_weights.to(device=device)
 
-    model = AuxGazeFactorizedViViT(
-        image_size=(H, W),
-        patch_size=args.spatial_patch_size,
-        frames=F,
-        channels=C,
-        n_classes=n_actions,
-        dim=args.embedding_dim,
-        spatial_depth=args.spatial_depth,
-        temporal_depth=args.temporal_depth,
-        spatial_heads=args.spatial_heads,
-        temporal_heads=args.temporal_heads,
-        dim_head=args.inner_dim,
-        mlp_dim=args.mlp_dim,
-        dropout=args.dropout,
-        use_flash_attn=True,
-        return_cls_attn=True,
-        use_temporal_mask=True,
-    ).to(device=device)
+    if config.algorithm == "AuxGazeFactorizedViViT":
+        model = AuxGazeFactorizedViViT(
+            image_size=(H, W),
+            patch_size=config.spatial_patch_size,
+            frames=F,
+            channels=C,
+            n_classes=n_actions,
+            dim=config.embedding_dim,
+            spatial_depth=config.spatial_depth,
+            temporal_depth=config.temporal_depth,
+            spatial_heads=config.spatial_heads,
+            temporal_heads=config.temporal_heads,
+            dim_head=config.inner_dim,
+            mlp_dim=config.mlp_dim,
+            dropout=config.dropout,
+            use_flash_attn=True,
+            return_cls_attn=True,
+            use_temporal_mask=True,
+        )
+    else:
+        model = FactorizedViViT(
+            image_size=(H, W),
+            patch_size=config.spatial_patch_size,
+            frames=F,
+            channels=C,
+            n_classes=n_actions,
+            dim=config.embedding_dim,
+            spatial_depth=config.spatial_depth,
+            temporal_depth=config.temporal_depth,
+            spatial_heads=config.spatial_heads,
+            temporal_heads=config.temporal_heads,
+            dim_head=config.inner_dim,
+            mlp_dim=config.mlp_dim,
+            dropout=config.dropout,
+            use_flash_attn=True,
+            return_cls_attn=True,
+            use_temporal_mask=True,
+        )
+    model = model.to(device)
     optimizer = optim.AdamW(
-        model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+        model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
     scaler = GradScaler()
 
     warmup_scheduler = LinearLR(
         optimizer,
-        start_factor=args.warmup_start_factor,
+        start_factor=config.warmup_start_factor,
         end_factor=1.0,
-        total_iters=args.warmup_epochs,
+        total_iters=config.warmup_epochs,
     )
 
-    decay_epochs = args.epochs - args.warmup_epochs
+    decay_epochs = config.epochs - config.warmup_epochs
     cosine_scheduler = CosineAnnealingLR(
-        optimizer, T_max=decay_epochs, eta_min=args.min_learning_rate
+        optimizer, T_max=decay_epochs, eta_min=config.min_learning_rate
     )
 
     scheduler = SequentialLR(
         optimizer,
         schedulers=[warmup_scheduler, cosine_scheduler],
-        milestones=[args.warmup_epochs],
+        milestones=[config.warmup_epochs],
     )
 
-    start_epoch, best_reward, wandb_id = load_checkpoint(
+    start_epoch, best_reward, wandb_id = checkpoint.load(
         resume_path, model, optimizer, scaler, scheduler
     )
 
@@ -433,7 +321,7 @@ def train(
     )
 
     dataset_len = len(observations)
-    train_size = int(args.train_pct * dataset_len)
+    train_size = int(config.train_pct * dataset_len)
     val_size = dataset_len - train_size
 
     train_obs, val_obs = observations[:train_size], observations[train_size:]
@@ -445,7 +333,7 @@ def train(
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=args.batch_size,
+        batch_size=config.batch_size,
         shuffle=True,
         num_workers=8,
         pin_memory=True,
@@ -453,16 +341,16 @@ def train(
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=args.batch_size,
+        batch_size=config.batch_size,
         shuffle=True,
         num_workers=8,
         pin_memory=True,
         persistent_workers=True,
     )
 
-    test_interval = args.epochs / args.n_tests
+    test_interval = config.epochs / config.n_tests
 
-    for e in range(start_epoch, args.epochs):
+    for e in range(start_epoch, config.epochs):
         metrics = {
             "train_loss": 0,
             "train_policy_loss": 0,
@@ -473,19 +361,19 @@ def train(
         # train loop
         model.train()
         for obs, g, a in train_loader:
-            obs, g = preprocess(args, obs, g)  # obs: (B, F, C, H, W), g: (B, F, H, W)
+            obs, g = preprocess(obs, g)  # obs: (B, F, C, H, W), g: (B, F, H, W)
             a = a.to(device=device)  # (B, n_actions)
 
             optimizer.zero_grad()
 
             pred_a, policy_loss, gaze_loss = calculate_loss(
-                args, model, class_weights, obs, g, a
+                model, class_weights, obs, g, a
             )  # pred_a: (B, n_actions)
-            loss = policy_loss + args.lambda_gaze * gaze_loss
+            loss = policy_loss + config.lambda_gaze * gaze_loss
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+            clip_grad_norm_(model.parameters(), config.clip_grad_norm)
             scaler.step(optimizer)
             scaler.update()
 
@@ -510,14 +398,14 @@ def train(
             with torch.no_grad():
                 for obs, g, a in val_loader:
                     obs, g = preprocess(
-                        args, obs, g, augment=False
+                        obs, g, augment=False
                     )  # obs: (B, F, C, H, W), g: (B, F, H, W)
                     a = a.to(device=device)  # (B, n_actions)
 
                     pred_a, policy_loss, gaze_loss = calculate_loss(
-                        args, model, class_weights, obs, g, a
+                        config, model, class_weights, obs, g, a
                     )
-                    loss = policy_loss + args.lambda_gaze * gaze_loss
+                    loss = policy_loss + config.lambda_gaze * gaze_loss
 
                     acc = (pred_a.argmax(dim=1) == a).float().sum()
 
@@ -536,11 +424,11 @@ def train(
                 std_steps,
                 best_rollout_obs,
                 best_rollout_g,
-            ) = test_agent(args, model)
+            ) = test_agent(model)
 
             if mean_reward > best_reward:
                 best_reward = mean_reward
-                save_path = f"{args.save_folder}/{args.game}/best_reward.pt"
+                save_path = f"{config.save_folder}/{config.game}/best_reward.pt"
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 torch.save(model.state_dict(), save_path)
 
@@ -566,18 +454,17 @@ def train(
 
         run.log(data=log_data)
 
-        save_checkpoint(
+        checkpoint.save(
             resume_path, e, best_reward, wandb_id, model, optimizer, scaler, scheduler
         )
 
-    save_path = f"{args.save_folder}/{args.game}/final.pt"
+    save_path = f"{config.save_folder}/{config.game}/final.pt"
     torch.save(model.state_dict(), save_path)
 
     run.finish()
 
 
 def preprocess(
-    args: Config,
     observations: torch.Tensor,
     gaze_coords: torch.Tensor,
     augment: bool = True,
@@ -598,22 +485,22 @@ def preprocess(
     gaze_masks = gaze.decaying_gaussian_mask(
         gaze_coords,
         shape=(H, W),
-        base_sigma=args.gaze_sigma,
-        temporal_decay=args.gaze_alpha,
-        blur_growth=args.gaze_beta,
+        base_sigma=config.gaze_sigma,
+        temporal_decay=config.gaze_alpha,
+        blur_growth=config.gaze_beta,
     )  # (B, F, H, W)
 
     # pre augmentation plots
-    if args.use_plots:
+    if config.use_plots:
         dataset.plot_frames(observations[random_example])
         dataset.plot_frames(gaze_masks.unsqueeze(2)[random_example])
 
     if augment:
         augment = Augment(
             frame_shape=(F, C, H, W),
-            crop_padding=args.augment_crop_padding,
-            cutout_hole_size=args.augment_cutout_hole_size,
-            p_spatial_corruption=args.augment_p_spatial_corruptions,
+            crop_padding=config.augment_crop_padding,
+            cutout_hole_size=config.augment_cutout_hole_size,
+            p_spatial_corruption=config.augment_p_spatial_corruptions,
         )
         observations, gaze_masks = augment(observations, gaze_masks)
 
@@ -621,17 +508,17 @@ def preprocess(
     gaze_masks = gaze_masks.to(device=device)  # (B, F, H, W)
 
     # # post augmentation plots
-    if args.use_plots:
+    if config.use_plots:
         dataset.plot_frames(observations[random_example])
         dataset.plot_frames(gaze_masks.unsqueeze(2)[random_example])
 
     # gaze_mask_patches = gaze.patchify(
-    #     aug_gaze_masks, patch_size=args.spatial_patch_size
+    #     aug_gaze_masks, patch_size=config.spatial_patch_size
     # )
     # B, F, gridR, gridR, patchR, patchC = gaze_mask_patches.shape
     #
     # # plotting random gaze patches
-    # if args.use_plots:
+    # if config.use_plots:
     #     gaze.plot_patches(gaze_mask_patches[random_example][0], 1)
     #
     # # pooling the last 2 dims of gaze
@@ -657,28 +544,22 @@ def set_seed(seed: int):
 
 
 def main():
-    args = Config()
+    set_seed(config.seed)
 
-    set_seed(args.seed)
+    # atari_games = dataset.list_games(config.atari_dataset_folder)
 
-    if len(sys.argv) > 1:
-        args.game_index = int(sys.argv[1])
-    else:
-        args.game_index = 0
-
-    atari_games = dataset.list_games(args.atari_dataset_folder)
-
-    args.game = atari_games[args.game_index]
-    print(f"Game: {args.game}")
+    # config.game = atari_games[config.game_index]
+    # config.game = "Alien"
+    print(f"Game: {config.game}")
 
     observations, gaze_coords, actions = dataset.load_data(
-        f"{args.atari_dataset_folder}/{args.game}",
-        frame_stack=args.frame_stack,
-        gaze_temporal_decay=args.gaze_alpha,
+        f"{config.atari_dataset_folder}/{config.game}",
+        frame_stack=config.frame_stack,
+        gaze_temporal_decay=config.gaze_alpha,
         device="cpu",
     )
 
-    train(args, observations, gaze_coords, actions)
+    train(observations, gaze_coords, actions)
 
 
 if __name__ == "__main__":

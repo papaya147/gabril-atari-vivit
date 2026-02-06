@@ -427,6 +427,7 @@ def train(
                 std_steps,
                 best_rollout_obs,
                 best_rollout_g,
+                best_rollout_overlaid,
             ) = test_agent(model)
 
             if mean_reward > best_reward:
@@ -579,6 +580,7 @@ def main():
     )
 
     observations = observations.float() / 255.0
+    actions = actions.long()
 
     train(observations.unsqueeze(2), gaze_saliency_maps, actions)
 

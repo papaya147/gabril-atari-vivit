@@ -1,5 +1,6 @@
 import math
 import os
+import platform
 from pathlib import Path
 from typing import List, Tuple
 
@@ -224,15 +225,38 @@ MAX_EPISODES_ATARI_HEAD = {
 }  # Atari_Head data
 
 
+def get_font(size=16):
+    system = platform.system()
+
+    if system == "Darwin":  # macOS
+        paths = [
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/Library/Fonts/Arial.ttf",
+        ]
+    elif system == "Linux":
+        paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
+        ]
+    else:  # Windows
+        return ImageFont.truetype("arial.ttf", size)
+
+    for path in paths:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+
+    # Fallback if nothing is found
+    return ImageFont.load_default()
+
+
 class FrameWriter:
     def __init__(self, input_dim, num_actions):
         self.input_dim = input_dim
 
         self.num_actions = num_actions
 
-        font = ImageFont.truetype(
-            "/System/Library/Fonts/Supplemental/Arial.ttf", size=16
-        )
+        font = get_font(16)
 
         pre_rendered_frames = []
         for action in range(num_actions):

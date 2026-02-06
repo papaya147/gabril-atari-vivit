@@ -66,7 +66,7 @@ class Config:
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--game", type=str, default="Alien")
-parser.add_argument("--atari-dataset-folder", type=str, default="./atari-dataset")
+parser.add_argument("--atari-dataset-folder", type=str, default="../atari-dataset")
 parser.add_argument("--use-plots", action="store_true", default=False)
 parser.add_argument("--save-folder", type=str, default="./models")
 parser.add_argument("--seed", type=int, default=42)

@@ -403,7 +403,7 @@ def train(
                     a = a.to(device=device)  # (B, n_actions)
 
                     pred_a, policy_loss, gaze_loss = calculate_loss(
-                        config, model, class_weights, obs, g, a
+                        model, class_weights, obs, g, a
                     )
                     loss = policy_loss + config.lambda_gaze * gaze_loss
 

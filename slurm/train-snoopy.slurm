@@ -30,4 +30,4 @@ echo "Job ID: $SLURM_ARRAY_JOB_ID | Task ID: $SLURM_ARRAY_TASK_ID"
 echo "Job started on $(hostname) at $(date)"
 echo "Running Algorithm: $ALGO_NAME with Loading Method: $LOADING_METHOD"
 
-srun python train.py --algorithm "$ALGO_NAME" --loading_method "$LOADING_METHOD"
+srun python train.py --algorithm "$ALGO_NAME" --loading-method "$LOADING_METHOD"

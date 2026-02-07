@@ -8,6 +8,7 @@ class Config:
     # paths and flags
     game: str
     atari_dataset_folder: str
+    loading_method: str
     use_plots: bool
     save_folder: str
     seed: int
@@ -57,20 +58,36 @@ class Config:
     warmup_start_factor: float
     min_learning_rate: float
 
-    # testing
-    n_tests: int
-    test_episodes: int
+    # validation per epoch
+    val_interval: int
+    val_episodes: int
     max_episode_length: int
+
+    # testing
+    test_model: str
+    test_episodes: int
 
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--game", type=str, default="Alien")
-parser.add_argument("--atari-dataset-folder", type=str, default="../atari-dataset")
+parser.add_argument("--atari-dataset-folder", type=str, default="./atari-dataset")
+parser.add_argument(
+    "--loading-method",
+    type=str,
+    choices=["mine", "gabril"],
+    default="mine",
+    help="Data loading method: 'mine' or 'gabril'",
+)
 parser.add_argument("--use-plots", action="store_true", default=False)
 parser.add_argument("--save-folder", type=str, default="./models")
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--algorithm", type=str, default="AuxGazeFactorizedViViT")
+parser.add_argument(
+    "--algorithm",
+    type=str,
+    choices=["FactorizedViViT", "AuxGazeFactorizedViViT"],
+    default="AuxGazeFactorizedViViT",
+)
 
 # frame handling
 parser.add_argument("--frame-stack", type=int, default=4)
@@ -123,10 +140,20 @@ parser.add_argument("--warmup-epochs", type=int, default=20)
 parser.add_argument("--warmup-start-factor", type=float, default=1e-10)
 parser.add_argument("--min-lr", type=float, default=1e-6)
 
-# testing
-parser.add_argument("--n-tests", type=int, default=50)
-parser.add_argument("--test-episodes", type=int, default=10)
+# validation per epoch
+parser.add_argument("--val-interval", type=int, default=10)
+parser.add_argument("--val-episodes", type=int, default=10)
 parser.add_argument("--max-episode-length", type=int, default=5000)
+
+# testing
+parser.add_argument(
+    "--test-model",
+    type=str,
+    choices=["best", "final"],
+    default="best",
+    help="Which saved model to use for testing: 'best' or 'final'",
+)
+parser.add_argument("--test-episodes", type=int, default=100)
 
 args = parser.parse_args()
 
@@ -134,6 +161,7 @@ config = Config(
     # paths and flags
     game=args.game,
     atari_dataset_folder=args.atari_dataset_folder,
+    loading_method=args.loading_method,
     use_plots=args.use_plots,
     save_folder=args.save_folder,
     seed=args.seed,
@@ -177,8 +205,11 @@ config = Config(
     warmup_epochs=args.warmup_epochs,
     warmup_start_factor=args.warmup_start_factor,
     min_learning_rate=args.min_lr,
-    # testing
-    n_tests=args.n_tests,
-    test_episodes=args.test_episodes,
+    # validation per epoch
+    val_interval=args.val_interval,
+    val_episodes=args.val_episodes,
     max_episode_length=args.max_episode_length,
+    # testing
+    test_model=args.test_model,
+    test_episodes=args.test_episodes,
 )

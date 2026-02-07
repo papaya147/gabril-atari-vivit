@@ -153,10 +153,8 @@ class Augment:
         self, observations: torch.Tensor, gaze_masks: torch.Tensor, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-
-        :param obs: (B, F, C, H, W)
-        :param gaze: (B, F, H, W)
-        :param kwargs:
+        :param observations: (B, F, C, H, W)
+        :param gaze_masks: (B, F, H, W)
         :return: (B, F, C, H, W), (B, F, H, W)
         """
         observations = observations.permute(0, 1, 3, 4, 2).numpy()  # (B, F, H, W, C)

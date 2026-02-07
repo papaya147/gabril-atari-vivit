@@ -2,7 +2,7 @@ import datetime
 import os
 import random
 import sys
-from typing import Tuple
+from typing import Literal, Tuple
 
 import ale_py
 import cv2
@@ -21,7 +21,6 @@ from torch.utils.data import DataLoader, TensorDataset
 import checkpoint
 import dataset
 import env_manager
-import gaze
 from augmentation import Augment
 from config import config
 from device import device
@@ -31,7 +30,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-def test_agent(model: torch.nn.Module):
+def evaluate_agent(model: torch.nn.Module, split: Literal["test", "val"]):
     """
     Runs the model in the actual Gym environment to measure performance.
     """
@@ -52,12 +51,16 @@ def test_agent(model: torch.nn.Module):
     best_return = -1
     best_rollout_obs = []
     best_rollout_g = []
+    best_rollout_overlaid = []
+
+    episodes = config.test_episodes if split == "test" else config.val_episodes
 
     model.eval()
-    for i in range(config.test_episodes):
-        obs, _ = env.reset()
+    for i in range(episodes):
+        seed = config.seed + i
+        obs, _ = env.reset(seed=seed)
         done = False
-        ep_reward = 0
+        ep_return = 0
         steps = 0
 
         rollout_obs = []
@@ -96,53 +99,53 @@ def test_agent(model: torch.nn.Module):
 
             obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            ep_reward += reward
+            ep_return += reward
 
-            rollout_obs.append(color_obs)
-            rollout_g.append(cls_attn[-1])
+            if split == "val":
+                rollout_obs.append(color_obs)
+                rollout_g.append(cls_attn[-1])
 
-        ep_returns.append(ep_reward)
+        ep_returns.append(ep_return)
         ep_steps.append(steps)
 
-        if ep_reward > best_return:
-            best_return = ep_reward
+        if split == "val" and ep_return > best_return:
+            best_return = ep_return
             best_rollout_obs = rollout_obs
             best_rollout_g = rollout_g
 
     env.close()
 
     ep_returns = np.array(ep_returns)
-    mean_return = float(ep_returns.mean())
-    std_return = float(ep_returns.std())
 
     ep_steps = np.array(ep_steps)
-    mean_steps = float(ep_steps.mean())
-    std_steps = float(ep_steps.std())
 
-    best_rollout_obs = np.stack(best_rollout_obs)
+    if split == "val":
+        best_rollout_obs = np.stack(best_rollout_obs)
 
-    best_rollout_g = np.stack(best_rollout_g)
+        best_rollout_g = np.stack(best_rollout_g)
 
-    g_min = best_rollout_g.min(axis=(1, 2), keepdims=True)
-    g_max = best_rollout_g.max(axis=(1, 2), keepdims=True)
-    denominator = g_max - g_min
-    denominator[denominator < 1e-8] = 1.0
-    best_rollout_g = (best_rollout_g - g_min) / denominator
+        g_min = best_rollout_g.min(axis=(1, 2), keepdims=True)
+        g_max = best_rollout_g.max(axis=(1, 2), keepdims=True)
+        denominator = g_max - g_min
+        denominator[denominator < 1e-8] = 1.0
+        best_rollout_g = (best_rollout_g - g_min) / denominator
 
-    best_rollout_overlaid = best_rollout_obs * np.expand_dims(best_rollout_g, axis=1)
+        best_rollout_overlaid = best_rollout_obs * np.expand_dims(
+            best_rollout_g, axis=1
+        )
 
-    best_rollout_g = np.power(best_rollout_g, 0.5)  # making colors brighter, optional
-    cmap = plt.get_cmap("viridis")
-    best_rollout_g = cmap(best_rollout_g)
-    best_rollout_g = best_rollout_g[..., :3]  # getting rid of alpha channel
-    best_rollout_g = (best_rollout_g * 255).astype(np.uint8)
-    best_rollout_g = np.transpose(best_rollout_g, (0, 3, 1, 2))
+        best_rollout_g = np.power(
+            best_rollout_g, 0.5
+        )  # making colors brighter, optional
+        cmap = plt.get_cmap("viridis")
+        best_rollout_g = cmap(best_rollout_g)
+        best_rollout_g = best_rollout_g[..., :3]  # getting rid of alpha channel
+        best_rollout_g = (best_rollout_g * 255).astype(np.uint8)
+        best_rollout_g = np.transpose(best_rollout_g, (0, 3, 1, 2))
 
     return (
-        mean_return,
-        std_return,
-        mean_steps,
-        std_steps,
+        ep_returns,
+        ep_steps,
         best_rollout_obs,
         best_rollout_g,
         best_rollout_overlaid,
@@ -210,14 +213,14 @@ def calculate_loss(
 
 def train(
     observations: torch.Tensor,
-    gaze_saliency_maps: torch.Tensor,
+    gaze_masks: torch.Tensor,
     actions: torch.Tensor,
 ):
     """
     Train a ViViT model.
 
     :param observations: (B, F, C, H, W)
-    :param gaze_saliency_maps: (B, F, H, W)
+    :param gaze_masks: (B, F, H, W)
     :param actions: (B)
     :return:
     """
@@ -301,7 +304,7 @@ def train(
         milestones=[config.warmup_epochs],
     )
 
-    start_epoch, best_reward, wandb_id = checkpoint.load(
+    start_epoch, best_return, wandb_id = checkpoint.load(
         resume_path, model, optimizer, scaler, scheduler
     )
 
@@ -311,7 +314,7 @@ def train(
     date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     run = wandb.init(
         entity="papaya147-ml",
-        project="GABRIL-Atari-ViViT",
+        project="FactorizedViViT-GABRIL-Atari",
         config=config.__dict__,
         name=f"{config.algorithm}_GABRIL-Atari-{config.game}_bs={config.batch_size}_{date_str}",
         job_type="train",
@@ -324,10 +327,9 @@ def train(
     val_size = dataset_len - train_size
 
     train_obs, val_obs = observations[:train_size], observations[train_size:]
-    # train_gaze, val_gaze = gaze_coords[:train_size], gaze_coords[train_size:]
     train_gaze, val_gaze = (
-        gaze_saliency_maps[:train_size],
-        gaze_saliency_maps[train_size:],
+        gaze_masks[:train_size],
+        gaze_masks[train_size:],
     )
     train_acts, val_acts = actions[:train_size], actions[train_size:]
 
@@ -351,14 +353,12 @@ def train(
         persistent_workers=True,
     )
 
-    test_interval = config.epochs / config.n_tests
-
     for e in range(start_epoch, config.epochs):
         metrics = {
-            "train_loss": 0,
-            "train_policy_loss": 0,
-            "train_gaze_loss": 0,
-            "train_acc": 0,
+            "train/train_loss": 0,
+            "train/train_policy_loss": 0,
+            "train/train_gaze_loss": 0,
+            "train/train_acc": 0,
         }
 
         # train loop
@@ -384,17 +384,17 @@ def train(
 
             curr_batch_size = obs.size(0)
 
-            metrics["train_loss"] += loss.item() * curr_batch_size
-            metrics["train_policy_loss"] += policy_loss.item() * curr_batch_size
-            metrics["train_gaze_loss"] += gaze_loss.item() * curr_batch_size
-            metrics["train_acc"] += acc.item()
+            metrics["train/train_loss"] += loss.item() * curr_batch_size
+            metrics["train/train_policy_loss"] += policy_loss.item() * curr_batch_size
+            metrics["train/train_gaze_loss"] += gaze_loss.item() * curr_batch_size
+            metrics["train/train_acc"] += acc.item()
 
-        mean_reward = -1
-        if (e + 1) % test_interval == 0:
-            metrics["val_loss"] = 0
-            metrics["val_policy_loss"] = 0
-            metrics["val_gaze_loss"] = 0
-            metrics["val_acc"] = 0
+        mean_return = -1
+        if (e + 1) % config.val_interval == 0:
+            metrics["eval/val_loss"] = 0
+            metrics["eval/val_policy_loss"] = 0
+            metrics["eval/val_gaze_loss"] = 0
+            metrics["eval/val_acc"] = 0
 
             # validation
             model.eval()
@@ -414,27 +414,28 @@ def train(
 
                     curr_batch_size = obs.size(0)
 
-                    metrics["val_loss"] += loss.item() * curr_batch_size
-                    metrics["val_policy_loss"] += policy_loss.item() * curr_batch_size
-                    metrics["val_gaze_loss"] += gaze_loss.item() * curr_batch_size
-                    metrics["val_acc"] += acc.item()
+                    metrics["eval/val_loss"] += loss.item() * curr_batch_size
+                    metrics["eval/val_policy_loss"] += (
+                        policy_loss.item() * curr_batch_size
+                    )
+                    metrics["eval/val_gaze_loss"] += gaze_loss.item() * curr_batch_size
+                    metrics["eval/val_acc"] += acc.item()
 
             # testing
             (
-                mean_reward,
-                std_reward,
-                mean_steps,
-                std_steps,
+                ep_returns,
+                ep_steps,
                 best_rollout_obs,
                 best_rollout_g,
                 best_rollout_overlaid,
-            ) = test_agent(model)
+            ) = evaluate_agent(model=model, split="val")
+            mean_return = float(ep_returns.mean())
 
-            if mean_reward > best_reward:
-                best_reward = mean_reward
-                save_path = f"{config.save_folder}/{config.game}/best_reward.pt"
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                torch.save(model.state_dict(), save_path)
+            if mean_return > best_return:
+                best_return = mean_return
+                final_save_path = f"{config.save_folder}/{config.game}/best_return.pt"
+                os.makedirs(os.path.dirname(final_save_path), exist_ok=True)
+                torch.save(model.state_dict(), final_save_path)
 
         scheduler.step()
 
@@ -443,59 +444,73 @@ def train(
             for k, v in metrics.items()
         }
         log_data["epoch"] = e
-        if mean_reward != -1:
-            log_data["mean_reward"] = mean_reward
-            log_data["std_reward"] = std_reward
-            log_data["mean_steps"] = mean_steps
-            log_data["std_steps"] = std_steps
-            log_data["best_rollout_obs"] = wandb.Video(
+        log_data["train/learning_rate"] = optimizer.param_groups[0]["lr"]
+        if mean_return != -1:
+            log_data["eval/mean_return"] = mean_return
+            log_data["eval/std_return"] = float(ep_returns.std())
+            log_data["eval/max_return"] = float(ep_returns.max())
+            log_data["eval/min_return"] = float(ep_returns.min())
+
+            log_data["eval/mean_steps"] = float(ep_steps.mean())
+            log_data["eval/std_steps"] = float(ep_steps.std())
+            log_data["eval/best_rollout_obs"] = wandb.Video(
                 best_rollout_obs, fps=15, format="gif"
             )
-            log_data["best_rollout_g"] = wandb.Video(
+            log_data["eval/best_rollout_g"] = wandb.Video(
                 best_rollout_g, fps=15, format="gif"
             )
-            log_data["best_rollout_overlaid"] = wandb.Video(
+            log_data["eval/best_rollout_overlaid"] = wandb.Video(
                 best_rollout_overlaid, fps=15, format="gif"
             )
-        log_data["learning_rate"] = optimizer.param_groups[0]["lr"]
 
         run.log(data=log_data)
 
         checkpoint.save(
-            resume_path, e, best_reward, wandb_id, model, optimizer, scaler, scheduler
+            resume_path, e, best_return, wandb_id, model, optimizer, scaler, scheduler
         )
 
-    save_path = f"{config.save_folder}/{config.game}/final.pt"
-    torch.save(model.state_dict(), save_path)
+    final_save_path = os.path.join(config.save_folder, config.game, "final.pt")
+    torch.save(model.state_dict(), final_save_path)
+
+    best_save_path = os.path.join(config.save_folder, config.game, "best_return.pt")
+    if config.test_model == "best":
+        model.load_state_dict(torch.load(best_save_path))
+
+    ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
+    run.summary["test/mean_return"] = np.mean(ep_returns)
+    run.summary["test/std_return"] = np.std(ep_returns)
+    run.summary["test/max_return"] = np.max(ep_returns)
+    run.summary["test/min_return"] = np.min(ep_returns)
+
+    table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
+    run.log({"test/return_distribution": wandb.plot.histogram(table, "return")})
+
+    final_model = wandb.Artifact(f"{run.name}-final-model", type="model")
+    final_model.add_file(final_save_path)
+    run.log_artifact(final_model)
+
+    best_model = wandb.Artifact(f"{run.name}-best-model", type="model")
+    best_model.add_file(best_save_path)
+    run.log_artifact(best_model)
 
     run.finish()
 
 
 def preprocess(
     observations: torch.Tensor,
-    gaze_coords: torch.Tensor,
+    gaze_masks: torch.Tensor,
     augment: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Augment the observations and gaze masks. # Convert the gaze masks into patches.
-    Normalize the gaze patches.
+    Augment the observations and gaze masks. Normalize the gaze masks.
 
     :param observations: (B, F, C, H, W)
-    :param gaze_coords: (B, F, gaze_layers, 2)
-    # :param gaze_masks: (B, F, H, W)
+    :param gaze_masks: (B, F, H, W)
     :param augment: Augment the data with random shifts, color jitter and noise?
     :return: (B, F, C, H, W), (B, F, H, W)
     """
     B, F, C, H, W = observations.shape
     random_example = random.randint(0, len(observations) - 1)
-
-    gaze_masks = gaze.decaying_gaussian_mask(
-        gaze_coords,
-        shape=(H, W),
-        base_sigma=config.gaze_sigma,
-        temporal_decay=config.gaze_alpha,
-        blur_growth=config.gaze_beta,
-    )  # (B, F, H, W)
 
     # pre augmentation plots
     if config.use_plots:
@@ -519,19 +534,6 @@ def preprocess(
         dataset.plot_frames(observations[random_example])
         dataset.plot_frames(gaze_masks.unsqueeze(2)[random_example])
 
-    # gaze_mask_patches = gaze.patchify(
-    #     aug_gaze_masks, patch_size=config.spatial_patch_size
-    # )
-    # B, F, gridR, gridR, patchR, patchC = gaze_mask_patches.shape
-    #
-    # # plotting random gaze patches
-    # if config.use_plots:
-    #     gaze.plot_patches(gaze_mask_patches[random_example][0], 1)
-    #
-    # # pooling the last 2 dims of gaze
-    # gaze_mask_patches = gaze_mask_patches.mean(dim=(-2, -1))
-    # gaze_mask_patches = gaze_mask_patches.view(B, F, gridR * gridR)
-    #
     # normalizing
     gaze_sums = gaze_masks.sum(dim=(-2, -1), keepdim=True)
     gaze_masks = gaze_masks / (gaze_sums + 1e-8)  # (B, F, H, W)
@@ -553,36 +555,18 @@ def set_seed(seed: int):
 def main():
     set_seed(config.seed)
 
-    # atari_games = dataset.list_games(config.atari_dataset_folder)
-
-    # config.game = atari_games[config.game_index]
-    # config.game = "Alien"
     print(f"Game: {config.game}")
 
-    observations, gaze_coords, actions = dataset.load_data(
-        f"{config.atari_dataset_folder}/{config.game}",
-        frame_stack=config.frame_stack,
-        gaze_temporal_decay=config.gaze_alpha,
-        device="cpu",
-    )
+    if config.loading_method == "mine":
+        observations, gaze_masks, actions = dataset.load_data()
+    elif config.loading_method == "gabril":
+        observations, actions, gaze_masks, _ = dataset.gabril_load_data(
+            num_episodes=dataset.MAX_EPISODES[config.game],
+        )
+    else:
+        raise ValueError(f"Unknown loading method: {config.loading_method}")
 
-    # observations, actions, gaze_saliency_maps, gaze_coordinates = dataset.load_dataset(
-    #     env=config.game,
-    #     seed=config.seed,
-    #     datapath=config.atari_dataset_folder,
-    #     conf_type="normal",
-    #     conf_randomness=0,
-    #     stack=config.frame_stack,
-    #     num_episodes=dataset.MAX_EPISODES[config.game],
-    #     use_gaze=True,
-    #     gaze_mask_sigma=config.gaze_sigma,
-    #     gaze_mask_coef=config.gaze_alpha,
-    # )
-    #
-    # observations = observations.float() / 255.0
-    # actions = actions.long()
-
-    train(observations, gaze_coords, actions)
+    train(observations, gaze_masks, actions)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ from device import device
 def save(
     path: str,
     epoch: int,
-    best_reward: float,
+    best_return: float,
     wandb_id: str,
     model: torch.nn.Module,
     optimizer: optim.Optimizer,
@@ -33,7 +33,7 @@ def save(
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler_state,
         "scaler_state_dict": scaler.state_dict(),
-        "best_reward": best_reward,
+        "best_return": best_return,
         "wandb_id": wandb_id,
         "rng_states": {
             "torch": torch.get_rng_state(),
@@ -78,8 +78,8 @@ def load(
 
     # Extract metadata
     start_epoch = checkpoint["epoch"] + 1
-    best_reward = checkpoint.get("best_reward", -float("inf"))
+    best_return = checkpoint.get("best_return", -float("inf"))
     wandb_id = checkpoint.get("wandb_id", None)
 
-    print(f"--> Resumed at Epoch {start_epoch}, Best Reward: {best_reward:.4f}")
-    return start_epoch, best_reward, wandb_id
+    print(f"--> Resumed at Epoch {start_epoch}, Best Return: {best_return:.4f}")
+    return start_epoch, best_return, wandb_id

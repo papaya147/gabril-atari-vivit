@@ -473,7 +473,7 @@ def train(
 
 def preprocess(
     observations: torch.Tensor,
-    gaze_masks: torch.Tensor,
+    gaze_coords: torch.Tensor,
     augment: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -481,21 +481,21 @@ def preprocess(
     Normalize the gaze patches.
 
     :param observations: (B, F, C, H, W)
-    # :param gaze_coords: (B, F, gaze_layers, 2)
-    :param gaze_masks: (B, F, H, W)
+    :param gaze_coords: (B, F, gaze_layers, 2)
+    # :param gaze_masks: (B, F, H, W)
     :param augment: Augment the data with random shifts, color jitter and noise?
     :return: (B, F, C, H, W), (B, F, H, W)
     """
     B, F, C, H, W = observations.shape
     random_example = random.randint(0, len(observations) - 1)
 
-    # gaze_masks = gaze.decaying_gaussian_mask(
-    #     gaze_coords,
-    #     shape=(H, W),
-    #     base_sigma=config.gaze_sigma,
-    #     temporal_decay=config.gaze_alpha,
-    #     blur_growth=config.gaze_beta,
-    # )  # (B, F, H, W)
+    gaze_masks = gaze.decaying_gaussian_mask(
+        gaze_coords,
+        shape=(H, W),
+        base_sigma=config.gaze_sigma,
+        temporal_decay=config.gaze_alpha,
+        blur_growth=config.gaze_beta,
+    )  # (B, F, H, W)
 
     # pre augmentation plots
     if config.use_plots:
@@ -559,30 +559,30 @@ def main():
     # config.game = "Alien"
     print(f"Game: {config.game}")
 
-    # observations, gaze_coords, actions = dataset.load_data(
-    #     f"{config.atari_dataset_folder}/{config.game}",
-    #     frame_stack=config.frame_stack,
-    #     gaze_temporal_decay=config.gaze_alpha,
-    #     device="cpu",
-    # )
-
-    observations, actions, gaze_saliency_maps, gaze_coordinates = dataset.load_dataset(
-        env=config.game,
-        seed=config.seed,
-        datapath=config.atari_dataset_folder,
-        conf_type="normal",
-        conf_randomness=0,
-        stack=config.frame_stack,
-        num_episodes=dataset.MAX_EPISODES[config.game],
-        use_gaze=True,
-        gaze_mask_sigma=config.gaze_sigma,
-        gaze_mask_coef=config.gaze_alpha,
+    observations, gaze_coords, actions = dataset.load_data(
+        f"{config.atari_dataset_folder}/{config.game}",
+        frame_stack=config.frame_stack,
+        gaze_temporal_decay=config.gaze_alpha,
+        device="cpu",
     )
 
-    observations = observations.float() / 255.0
-    actions = actions.long()
+    # observations, actions, gaze_saliency_maps, gaze_coordinates = dataset.load_dataset(
+    #     env=config.game,
+    #     seed=config.seed,
+    #     datapath=config.atari_dataset_folder,
+    #     conf_type="normal",
+    #     conf_randomness=0,
+    #     stack=config.frame_stack,
+    #     num_episodes=dataset.MAX_EPISODES[config.game],
+    #     use_gaze=True,
+    #     gaze_mask_sigma=config.gaze_sigma,
+    #     gaze_mask_coef=config.gaze_alpha,
+    # )
+    #
+    # observations = observations.float() / 255.0
+    # actions = actions.long()
 
-    train(observations.unsqueeze(2), gaze_saliency_maps, actions)
+    train(observations, gaze_coords, actions)
 
 
 if __name__ == "__main__":

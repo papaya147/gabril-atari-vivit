@@ -56,8 +56,8 @@ def evaluate_agent(model: torch.nn.Module, split: Literal["test", "val"]):
     episodes = config.test_episodes if split == "test" else config.val_episodes
 
     model.eval()
-    for i in range(episodes):
-        seed = config.seed + i
+    for ep in range(episodes):
+        seed = config.seed + 1000 * ep
         obs, _ = env.reset(seed=seed)
         done = False
         ep_return = 0

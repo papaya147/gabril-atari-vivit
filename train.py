@@ -224,7 +224,10 @@ def train(
     :param actions: (B)
     :return:
     """
-    resume_path = f"{config.save_folder}/{config.game}/latest_checkpoint.pt"
+    date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_name = f"{config.algorithm}_GABRIL-Atari-{config.game}_bs={config.batch_size}_{date_str}"
+    save_dir = f"{config.save_folder}/{run_name}"
+    resume_path = f"{save_dir}/latest_checkpoint.pt"
 
     B, F, C, H, W = observations.shape
     n_actions = torch.max(actions).item() + 1
@@ -311,12 +314,11 @@ def train(
     if wandb_id is None:
         wandb_id = wandb.util.generate_id()
 
-    date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     run = wandb.init(
         entity="papaya147-ml",
         project="FactorizedViViT-GABRIL-Atari",
         config=config.__dict__,
-        name=f"{config.algorithm}_GABRIL-Atari-{config.game}_bs={config.batch_size}_{date_str}",
+        name=run_name,
         job_type="train",
         id=wandb_id,
         resume="allow",
@@ -433,8 +435,8 @@ def train(
 
             if mean_return > best_return:
                 best_return = mean_return
-                best_save_path = f"{config.save_folder}/{config.game}/best_return.pt"
-                os.makedirs(os.path.dirname(best_save_path), exist_ok=True)
+                best_save_path = f"{save_dir}/best_return.pt"
+                os.makedirs(save_dir, exist_ok=True)
                 torch.save(model.state_dict(), best_save_path)
 
         scheduler.step()
@@ -470,7 +472,7 @@ def train(
         )
 
     # testing and saving final model
-    final_save_path = os.path.join(config.save_folder, config.game, "final.pt")
+    final_save_path = os.path.join(save_dir, "final.pt")
     torch.save(model.state_dict(), final_save_path)
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
@@ -487,7 +489,7 @@ def train(
     run.log_artifact(final_model)
 
     # testing and saving best model
-    best_save_path = os.path.join(config.save_folder, config.game, "best_return.pt")
+    best_save_path = os.path.join(save_dir, "best_return.pt")
     model.load_state_dict(torch.load(best_save_path))
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")

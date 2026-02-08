@@ -64,7 +64,6 @@ class Config:
     max_episode_length: int
 
     # testing
-    test_model: str
     test_episodes: int
 
 
@@ -146,13 +145,6 @@ parser.add_argument("--val-episodes", type=int, default=10)
 parser.add_argument("--max-episode-length", type=int, default=5000)
 
 # testing
-parser.add_argument(
-    "--test-model",
-    type=str,
-    choices=["best", "final"],
-    default="best",
-    help="Which saved model to use for testing: 'best' or 'final'",
-)
 parser.add_argument("--test-episodes", type=int, default=100)
 
 args = parser.parse_args()
@@ -210,6 +202,5 @@ config = Config(
     val_episodes=args.val_episodes,
     max_episode_length=args.max_episode_length,
     # testing
-    test_model=args.test_model,
     test_episodes=args.test_episodes,
 )

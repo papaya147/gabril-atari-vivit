@@ -433,9 +433,9 @@ def train(
 
             if mean_return > best_return:
                 best_return = mean_return
-                final_save_path = f"{config.save_folder}/{config.game}/best_return.pt"
-                os.makedirs(os.path.dirname(final_save_path), exist_ok=True)
-                torch.save(model.state_dict(), final_save_path)
+                best_save_path = f"{config.save_folder}/{config.game}/best_return.pt"
+                os.makedirs(os.path.dirname(best_save_path), exist_ok=True)
+                torch.save(model.state_dict(), best_save_path)
 
         scheduler.step()
 
@@ -469,25 +469,35 @@ def train(
             resume_path, e, best_return, wandb_id, model, optimizer, scaler, scheduler
         )
 
+    # testing and saving final model
     final_save_path = os.path.join(config.save_folder, config.game, "final.pt")
     torch.save(model.state_dict(), final_save_path)
 
-    best_save_path = os.path.join(config.save_folder, config.game, "best_return.pt")
-    if config.test_model == "best":
-        model.load_state_dict(torch.load(best_save_path))
-
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
-    run.summary["test/mean_return"] = np.mean(ep_returns)
-    run.summary["test/std_return"] = np.std(ep_returns)
-    run.summary["test/max_return"] = np.max(ep_returns)
-    run.summary["test/min_return"] = np.min(ep_returns)
+    run.summary["test/final/mean_return"] = np.mean(ep_returns)
+    run.summary["test/final/std_return"] = np.std(ep_returns)
+    run.summary["test/final/max_return"] = np.max(ep_returns)
+    run.summary["test/final/min_return"] = np.min(ep_returns)
 
     table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
-    run.log({"test/return_distribution": wandb.plot.histogram(table, "return")})
+    run.log({"test/final/return_distribution": wandb.plot.histogram(table, "return")})
 
     final_model = wandb.Artifact(f"{run.name}-final-model", type="model")
     final_model.add_file(final_save_path)
     run.log_artifact(final_model)
+
+    # testing and saving best model
+    best_save_path = os.path.join(config.save_folder, config.game, "best_return.pt")
+    model.load_state_dict(torch.load(best_save_path))
+
+    ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
+    run.summary["test/best/mean_return"] = np.mean(ep_returns)
+    run.summary["test/best/std_return"] = np.std(ep_returns)
+    run.summary["test/best/max_return"] = np.max(ep_returns)
+    run.summary["test/best/min_return"] = np.min(ep_returns)
+
+    table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
+    run.log({"test/best/return_distribution": wandb.plot.histogram(table, "return")})
 
     best_model = wandb.Artifact(f"{run.name}-best-model", type="model")
     best_model.add_file(best_save_path)

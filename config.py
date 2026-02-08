@@ -139,7 +139,7 @@ parser.add_argument("--warmup-epochs", type=int, default=20)
 parser.add_argument("--warmup-start-factor", type=float, default=1e-10)
 parser.add_argument("--min-lr", type=float, default=1e-6)
 
-# validation per epoch
+# validation
 parser.add_argument("--val-interval", type=int, default=100)
 parser.add_argument("--val-episodes", type=int, default=100)
 parser.add_argument("--max-episode-length", type=int, default=5000)

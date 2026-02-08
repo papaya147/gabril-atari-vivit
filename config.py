@@ -105,21 +105,21 @@ parser.add_argument("--aug-noise-std", type=float, default=0.01)
 parser.add_argument("--aug-p-pixel-dropout", type=float, default=0.01)
 parser.add_argument("--aug-posterize-bits", type=int, default=4)
 parser.add_argument("--aug-blur-pixels", type=int, default=2)
-parser.add_argument("--aug-p-spatial", type=float, default=0.5)
+parser.add_argument("--aug-p-spatial", type=float, default=0.8)
 parser.add_argument("--aug-p-temporal", type=float, default=0.25)
 
 # transformer arch
 parser.add_argument(
     "--patch-size", type=int, default=6, help="Spatial patch size (square)"
 )
-parser.add_argument("--emb-dim", type=int, default=256)
-parser.add_argument("--spatial-depth", type=int, default=4)
+parser.add_argument("--emb-dim", type=int, default=128)
+parser.add_argument("--spatial-depth", type=int, default=2)
 parser.add_argument("--temporal-depth", type=int, default=2)
-parser.add_argument("--spatial-heads", type=int, default=4)
-parser.add_argument("--temporal-heads", type=int, default=4)
+parser.add_argument("--spatial-heads", type=int, default=8)
+parser.add_argument("--temporal-heads", type=int, default=8)
 parser.add_argument("--inner-dim", type=int, default=64)
-parser.add_argument("--mlp-dim", type=int, default=512)
-parser.add_argument("--dropout", type=float, default=0.1)
+parser.add_argument("--mlp-dim", type=int, default=256)
+parser.add_argument("--dropout", type=float, default=0.25)
 
 # hyperparams
 parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
@@ -127,11 +127,11 @@ parser.add_argument("--epochs", type=int, default=500)
 parser.add_argument(
     "--train-pct", type=float, default=0.95, help="Percentage of data for training"
 )
-parser.add_argument("--batch-size", type=int, default=32)
+parser.add_argument("--batch-size", type=int, default=64)
 parser.add_argument(
-    "--lambda-gaze", type=float, default=0.1, help="Weight for gaze auxiliary loss"
+    "--lambda-gaze", type=float, default=0.5, help="Weight for gaze auxiliary loss"
 )
-parser.add_argument("--weight-decay", type=float, default=5e-2)
+parser.add_argument("--weight-decay", type=float, default=0.1)
 parser.add_argument("--scheduler-factor", type=float, default=0.5)
 parser.add_argument("--scheduler-patience", type=int, default=5)
 parser.add_argument("--clip-grad-norm", type=float, default=1.0)

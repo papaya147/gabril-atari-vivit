@@ -112,13 +112,13 @@ parser.add_argument("--aug-p-temporal", type=float, default=0.25)
 parser.add_argument(
     "--patch-size", type=int, default=6, help="Spatial patch size (square)"
 )
-parser.add_argument("--emb-dim", type=int, default=128)
-parser.add_argument("--spatial-depth", type=int, default=2)
+parser.add_argument("--emb-dim", type=int, default=256)
+parser.add_argument("--spatial-depth", type=int, default=4)
 parser.add_argument("--temporal-depth", type=int, default=2)
 parser.add_argument("--spatial-heads", type=int, default=8)
 parser.add_argument("--temporal-heads", type=int, default=8)
 parser.add_argument("--inner-dim", type=int, default=64)
-parser.add_argument("--mlp-dim", type=int, default=256)
+parser.add_argument("--mlp-dim", type=int, default=512)
 parser.add_argument("--dropout", type=float, default=0.25)
 
 # hyperparams

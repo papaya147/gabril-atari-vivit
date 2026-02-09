@@ -474,10 +474,19 @@ def train(
     torch.save(model.state_dict(), final_save_path)
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
-    run.summary["test/final/returns"] = [[r] for r in ep_returns.tolist()]
+    raw_returns = ep_returns.tolist()
 
-    table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
-    run.log({"test/final/return_distribution": wandb.plot.histogram(table, "return")})
+    eval_table = wandb.Table(data=[[r] for r in raw_returns], columns=["return"])
+
+    run.log(
+        {
+            "test/final/returns": eval_table,
+            # "test/final/box_plot": wandb.plot.box(eval_table, "return", title="Final Return Dist"),
+            "test/final/return_distribution": wandb.plot.histogram(
+                eval_table, "return"
+            ),
+        }
+    )
 
     final_model = wandb.Artifact(f"{run.name}-final-model", type="model")
     final_model.add_file(final_save_path)
@@ -488,10 +497,17 @@ def train(
     model.load_state_dict(torch.load(best_save_path))
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
-    run.summary["test/best/returns"] = [[r] for r in ep_returns.tolist()]
+    raw_returns = ep_returns.tolist()
 
-    table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
-    run.log({"test/best/return_distribution": wandb.plot.histogram(table, "return")})
+    eval_table = wandb.Table(data=[[r] for r in raw_returns], columns=["return"])
+
+    run.log(
+        {
+            "test/best/returns": eval_table,
+            # "test/best/box_plot": wandb.plot.box(eval_table, "return", title="Final Return Dist"),
+            "test/best/return_distribution": wandb.plot.histogram(eval_table, "return"),
+        }
+    )
 
     best_model = wandb.Artifact(f"{run.name}-best-model", type="model")
     best_model.add_file(best_save_path)

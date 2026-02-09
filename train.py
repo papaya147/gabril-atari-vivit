@@ -474,17 +474,38 @@ def train(
     torch.save(model.state_dict(), final_save_path)
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
-    raw_returns = ep_returns.tolist()
 
-    eval_table = wandb.Table(data=[[r] for r in raw_returns], columns=["return"])
+    mean_val = np.mean(ep_returns)
+    std_val = np.std(ep_returns)
+    max_val = np.max(ep_returns)
+    min_val = np.min(ep_returns)
+
+    eval_table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
+
+    summary_table = wandb.Table(
+        columns=["Run Name", "Mean Return", "Std Dev", "Max Return", "Min Return"],
+        data=[
+            [
+                run.name,
+                f"{mean_val:.2f}",
+                f"{std_val:.2f}",
+                f"{max_val:.2f}",
+                f"{min_val:.2f}",
+            ]
+        ],
+    )
 
     run.log(
         {
             "test/final/returns": eval_table,
-            # "test/final/box_plot": wandb.plot.box(eval_table, "return", title="Final Return Dist"),
             "test/final/return_distribution": wandb.plot.histogram(
                 eval_table, "return"
             ),
+            "test/final/mean_return": mean_val,
+            "test/final/std_return": std_val,
+            "test/final/max_return": max_val,
+            "test/final/min_return": min_val,
+            "test/final/summary_return": summary_table,
         }
     )
 
@@ -497,15 +518,36 @@ def train(
     model.load_state_dict(torch.load(best_save_path))
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
-    raw_returns = ep_returns.tolist()
 
-    eval_table = wandb.Table(data=[[r] for r in raw_returns], columns=["return"])
+    mean_val = np.mean(ep_returns)
+    std_val = np.std(ep_returns)
+    max_val = np.max(ep_returns)
+    min_val = np.min(ep_returns)
+
+    eval_table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
+
+    summary_table = wandb.Table(
+        columns=["Run Name", "Mean Return", "Std Dev", "Max Return", "Min Return"],
+        data=[
+            [
+                run.name,
+                f"{mean_val:.2f}",
+                f"{std_val:.2f}",
+                f"{max_val:.2f}",
+                f"{min_val:.2f}",
+            ]
+        ],
+    )
 
     run.log(
         {
             "test/best/returns": eval_table,
-            # "test/best/box_plot": wandb.plot.box(eval_table, "return", title="Final Return Dist"),
             "test/best/return_distribution": wandb.plot.histogram(eval_table, "return"),
+            "test/best/mean_return": mean_val,
+            "test/best/std_return": std_val,
+            "test/best/max_return": max_val,
+            "test/best/min_return": min_val,
+            "test/best/summary_return": summary_table,
         }
     )
 

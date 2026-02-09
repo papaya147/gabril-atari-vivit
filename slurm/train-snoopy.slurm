@@ -5,8 +5,8 @@
 #SBATCH --array=0-3
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=10
-#SBATCH --mem=48G
+#SBATCH --cpus-per-task=5
+#SBATCH --mem=40G
 #SBATCH --time=24:00:00
 #SBATCH --gres=shard:12
 

@@ -342,7 +342,7 @@ def train(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
-        num_workers=8,
+        num_workers=4,
         pin_memory=True,
         persistent_workers=True,
     )
@@ -350,7 +350,7 @@ def train(
         val_dataset,
         batch_size=config.batch_size,
         shuffle=True,
-        num_workers=8,
+        num_workers=4,
         pin_memory=True,
         persistent_workers=True,
     )

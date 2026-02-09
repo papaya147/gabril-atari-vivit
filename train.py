@@ -474,10 +474,7 @@ def train(
     torch.save(model.state_dict(), final_save_path)
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
-    run.summary["test/final/mean_return"] = np.mean(ep_returns)
-    run.summary["test/final/std_return"] = np.std(ep_returns)
-    run.summary["test/final/max_return"] = np.max(ep_returns)
-    run.summary["test/final/min_return"] = np.min(ep_returns)
+    run.summary["test/final/returns"] = ep_returns.tolist()
 
     table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
     run.log({"test/final/return_distribution": wandb.plot.histogram(table, "return")})
@@ -491,10 +488,7 @@ def train(
     model.load_state_dict(torch.load(best_save_path))
 
     ep_returns, ep_steps, _, _, _ = evaluate_agent(model=model, split="test")
-    run.summary["test/best/mean_return"] = np.mean(ep_returns)
-    run.summary["test/best/std_return"] = np.std(ep_returns)
-    run.summary["test/best/max_return"] = np.max(ep_returns)
-    run.summary["test/best/min_return"] = np.min(ep_returns)
+    run.summary["test/best/returns"] = ep_returns.tolist()
 
     table = wandb.Table(data=[[r] for r in ep_returns], columns=["return"])
     run.log({"test/best/return_distribution": wandb.plot.histogram(table, "return")})

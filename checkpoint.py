@@ -15,7 +15,6 @@ def save(
     path: str,
     epoch: int,
     best_return: float,
-    wandb_id: str,
     model: torch.nn.Module,
     optimizer: optim.Optimizer,
     scaler: GradScaler,
@@ -34,7 +33,6 @@ def save(
         "scheduler_state_dict": scheduler_state,
         "scaler_state_dict": scaler.state_dict(),
         "best_return": best_return,
-        "wandb_id": wandb_id,
         "rng_states": {
             "torch": torch.get_rng_state(),
             "cuda": torch.cuda.get_rng_state_all(),
@@ -51,9 +49,9 @@ def load(
     optimizer: optim.Optimizer,
     scaler: GradScaler,
     scheduler: SequentialLR = None,
-) -> Tuple[int, float, str | None]:
+) -> Tuple[int, float]:
     if not os.path.exists(path):
-        return 0, -float("inf"), None
+        return 0, -float("inf")
 
     print(f"--> Found checkpoint! Resuming from {path}")
     checkpoint = torch.load(path, map_location=device, weights_only=False)
@@ -79,7 +77,6 @@ def load(
     # Extract metadata
     start_epoch = checkpoint["epoch"] + 1
     best_return = checkpoint.get("best_return", -float("inf"))
-    wandb_id = checkpoint.get("wandb_id", None)
 
     print(f"--> Resumed at Epoch {start_epoch}, Best Return: {best_return:.4f}")
-    return start_epoch, best_return, wandb_id
+    return start_epoch, best_return

@@ -224,10 +224,11 @@ def train(
     :param actions: (B)
     :return:
     """
+    run_id = config.run_id
     date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_name = f"{config.algorithm}_GABRIL-Atari-{config.game}_bs={config.batch_size}_{date_str}"
-    save_dir = f"{config.save_folder}/{run_name}"
-    resume_path = f"{save_dir}/latest_checkpoint.pt"
+    run_name = f"{config.algorithm}_{config.game}_{run_id}_{date_str}"
+    save_dir = os.path.join(config.save_folder, run_id)
+    resume_path = os.path.join(save_dir, "latest_checkpoint.pt")
 
     B, F, C, H, W = observations.shape
     n_actions = torch.max(actions).item() + 1
@@ -307,12 +308,9 @@ def train(
         milestones=[config.warmup_epochs],
     )
 
-    start_epoch, best_return, wandb_id = checkpoint.load(
+    start_epoch, best_return = checkpoint.load(
         resume_path, model, optimizer, scaler, scheduler
     )
-
-    if wandb_id is None:
-        wandb_id = wandb.util.generate_id()
 
     run = wandb.init(
         entity="papaya147-ml",
@@ -320,7 +318,7 @@ def train(
         config=config.__dict__,
         name=run_name,
         job_type="train",
-        id=wandb_id,
+        id=run_id,
         resume="allow",
     )
 
@@ -468,7 +466,7 @@ def train(
         run.log(data=log_data)
 
         checkpoint.save(
-            resume_path, e, best_return, wandb_id, model, optimizer, scaler, scheduler
+            resume_path, e, best_return, model, optimizer, scaler, scheduler
         )
 
     # testing and saving final model

@@ -1,5 +1,7 @@
 import argparse
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import asdict, dataclass
 from typing import Tuple
 
 
@@ -65,6 +67,18 @@ class Config:
 
     # testing
     test_episodes: int
+
+    @property
+    def run_id(self) -> str:
+        """Deterministic hash of training-relevant config fields.
+        Used as both the wandb run ID and the checkpoint subfolder name."""
+        d = asdict(self)
+        # Exclude fields that don't affect training
+        for key in ("save_folder", "use_plots"):
+            d.pop(key, None)
+        # Sort keys for determinism, convert tuples (lists after asdict) back to stable repr
+        raw = json.dumps(d, sort_keys=True)
+        return hashlib.sha256(raw.encode()).hexdigest()[:12]
 
 
 parser = argparse.ArgumentParser()

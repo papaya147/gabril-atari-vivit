@@ -83,7 +83,7 @@ class Config:
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--game", type=str, default="Alien")
+parser.add_argument("--game", type=str, default="ChopperCommand")
 parser.add_argument("--atari-dataset-folder", type=str, default="./atari-dataset")
 parser.add_argument(
     "--loading-method",
@@ -143,7 +143,7 @@ parser.add_argument(
 )
 parser.add_argument("--batch-size", type=int, default=64)
 parser.add_argument(
-    "--lambda-gaze", type=float, default=0.5, help="Weight for gaze auxiliary loss"
+    "--lambda-gaze", type=float, default=0.1, help="Weight for gaze auxiliary loss"
 )
 parser.add_argument("--weight-decay", type=float, default=0.1)
 parser.add_argument("--scheduler-factor", type=float, default=0.5)

@@ -15,6 +15,7 @@ class Config:
     save_folder: str
     seed: int
     algorithm: str
+    no_gaze: bool
 
     frame_stack: int
     frame_skip: int
@@ -104,6 +105,12 @@ parser.add_argument(
     choices=["FactorizedViViT", "AuxGazeFactorizedViViT"],
     default="AuxGazeFactorizedViViT",
 )
+parser.add_argument(
+    "--no-gaze",
+    action="store_true",
+    default=False,
+    help="Disable gaze regularization loss. Works with any architecture.",
+)
 
 # frame handling
 parser.add_argument("--frame-stack", type=int, default=4)
@@ -182,6 +189,7 @@ config = Config(
     save_folder=args.save_folder,
     seed=args.seed,
     algorithm=args.algorithm,
+    no_gaze=args.no_gaze,
     frame_stack=args.frame_stack,
     frame_skip=args.frame_skip,
     # gaze

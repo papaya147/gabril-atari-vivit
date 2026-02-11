@@ -247,8 +247,11 @@ def calculate_loss(
         # behavior cloning loss
         policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
 
-        # gaze loss
-        gaze_loss = gaze_kl_loss(cls_attn, g)
+        # gaze loss (skip when no_gaze is set)
+        if config.no_gaze:
+            gaze_loss = torch.tensor(0.0, device=obs.device)
+        else:
+            gaze_loss = gaze_kl_loss(cls_attn, g)
 
         return pred_a, policy_loss, gaze_loss
 
@@ -270,7 +273,8 @@ def train(
     """
     run_id = config.run_id
     date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_name = f"{config.algorithm}_{config.game}_{run_id}_{date_str}"
+    algo_label = f"{config.algorithm}_NoGaze" if config.no_gaze else config.algorithm
+    run_name = f"{algo_label}_{config.game}_{run_id}_{date_str}"
     save_dir = os.path.join(config.save_folder, run_id)
     resume_path = os.path.join(save_dir, "latest_checkpoint.pt")
 

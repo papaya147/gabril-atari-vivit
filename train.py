@@ -213,14 +213,16 @@ def calculate_loss(
 
 def train(
     observations: torch.Tensor,
-    gaze_masks: torch.Tensor,
+    gaze_coords: torch.Tensor,
     actions: torch.Tensor,
 ):
     """
     Train a ViViT model.
 
     :param observations: (B, F, C, H, W)
-    :param gaze_masks: (B, F, H, W)
+    :param gaze_coords: Gaze coordinate data — (B, F, layers, 2) for mine,
+                         or (B, F, 41, 2) windowed coords for gabril.
+                         Masks are computed per-batch in preprocess.
     :param actions: (B)
     :return:
     """
@@ -328,8 +330,8 @@ def train(
 
     train_obs, val_obs = observations[:train_size], observations[train_size:]
     train_gaze, val_gaze = (
-        gaze_masks[:train_size],
-        gaze_masks[train_size:],
+        gaze_coords[:train_size],
+        gaze_coords[train_size:],
     )
     train_acts, val_acts = actions[:train_size], actions[train_size:]
 
@@ -560,18 +562,32 @@ def train(
 
 def preprocess(
     observations: torch.Tensor,
-    gaze_masks: torch.Tensor,
+    gaze_coords: torch.Tensor,
     augment: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Augment the observations and gaze masks. Normalize the gaze masks.
+    Compute gaze masks from gaze coordinates, augment the observations and
+    gaze masks, and normalize the gaze masks.
 
     :param observations: (B, F, C, H, W)
-    :param gaze_masks: (B, F, H, W)
+    :param gaze_coords: Gaze coordinate data — (B, F, layers, 2) for mine,
+                         or (B, F, 41, 2) windowed coords for gabril.
     :param augment: Augment the data with random shifts, color jitter and noise?
     :return: (B, F, C, H, W), (B, F, H, W)
     """
     B, F, C, H, W = observations.shape
+
+    if config.loading_method == "mine":
+        gaze_masks = dataset.decaying_gaussian_mask(
+            gaze_coords=gaze_coords,
+            shape=(H, W),
+            base_sigma=config.gaze_sigma,
+            temporal_decay=config.gaze_alpha,
+            blur_growth=config.gaze_beta,
+        )
+    else:
+        gaze_masks = dataset.gabril_gaze_mask(gaze_coords)
+
     random_example = random.randint(0, len(observations) - 1)
 
     # pre augmentation plots
@@ -620,15 +636,15 @@ def main():
     print(f"Game: {config.game}")
 
     if config.loading_method == "mine":
-        observations, gaze_masks, actions = dataset.load_data()
+        observations, gaze_coords, actions = dataset.load_data()
     elif config.loading_method == "gabril":
-        observations, actions, gaze_masks, _ = dataset.gabril_load_data(
+        observations, actions, gaze_coords, _ = dataset.gabril_load_data(
             num_episodes=dataset.MAX_EPISODES[config.game],
         )
     else:
         raise ValueError(f"Unknown loading method: {config.loading_method}")
 
-    train(observations, gaze_masks, actions)
+    train(observations, gaze_coords, actions)
 
 
 if __name__ == "__main__":

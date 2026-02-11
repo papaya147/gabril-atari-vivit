@@ -273,7 +273,7 @@ def load_data() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     Load Atari data for training and testing.
     Reads game, paths, and gaze parameters from config.
 
-    :return: observations (B, F, C, H, W), gaze_masks (B, F, H, W), actions (B)
+    :return: observations (B, F, C, H, W), gaze_coords (B, F, layers, 2), actions (B)
     """
     folder = f"{config.atari_dataset_folder}/{config.game}"
     files_list = [p for p in Path(folder).iterdir() if p.is_file()]
@@ -304,16 +304,7 @@ def load_data() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         observation_list, gaze_coord_list, config.frame_stack
     )
 
-    B, F, H, W = observations.shape
-    gaze_masks = decaying_gaussian_mask(
-        gaze_coords=gaze_coords,
-        shape=(H, W),
-        base_sigma=config.gaze_sigma,
-        temporal_decay=config.gaze_alpha,
-        blur_growth=config.gaze_beta,
-    )
-
-    return observations.unsqueeze(2), gaze_masks, actions
+    return observations.unsqueeze(2), gaze_coords, actions
 
 
 def plot_frames(frames: torch.Tensor):
@@ -520,6 +511,80 @@ class GazeToMask:
         return current_maps / torch.max(current_maps)
 
 
+def gabril_gaze_windows(episode_gaze: List[torch.Tensor]) -> List[torch.Tensor]:
+    """
+    Collect per-timestep gaze coordinate windows for deferred saliency computation.
+    Each window is a fixed-size tensor aligned to sigma indices, with NaN for
+    missing entries.
+
+    :param episode_gaze: List of tensors, each (ep_len, gaze_dim) with gaze
+                         information per episode.
+    :return: List of tensors, each (ep_len, 41, 2) with NaN padding.
+    """
+    short_memory_length = 20
+    stride = 2
+    num_sigmas = 2 * short_memory_length + 1  # 41
+
+    windowed = []
+    for ep in tqdm(episode_gaze):
+        ep_coords = ep[:, :2]  # (ep_len, 2)
+        L = len(ep_coords)
+        windows = torch.full((L, num_sigmas, 2), float("nan"))
+
+        for j in range(L):
+            start = max(0, j - stride * short_memory_length)
+            end_idx = min(short_memory_length * stride + j + 1, L)
+            offset_start = max(short_memory_length - j, 0)
+
+            coords = ep_coords[start:end_idx:stride]
+            k = len(coords)
+            windows[j, offset_start : offset_start + k] = coords
+
+        windowed.append(windows)
+
+    return windowed
+
+
+def gabril_gaze_mask(gaze_windows: torch.Tensor) -> torch.Tensor:
+    """
+    Compute saliency gaze masks from pre-collected gaze coordinate windows.
+
+    :param gaze_windows: (..., 41, 2) with NaN for missing coordinates.
+    :return: (..., 84, 84) saliency masks.
+    """
+    short_memory_length = 20
+
+    saliency_sigmas = [
+        config.gaze_sigma / (0.99 ** (short_memory_length - i))
+        for i in range(short_memory_length + 1)
+    ]
+    coeficients = [
+        config.gaze_alpha ** (short_memory_length - i)
+        for i in range(short_memory_length + 1)
+    ]
+    coeficients += coeficients[::-1][1:]
+    saliency_sigmas += saliency_sigmas[::-1][1:]
+
+    MASK = GazeToMask(84, saliency_sigmas, coeficients=coeficients)
+
+    batch_shape = gaze_windows.shape[:-2]
+    num_sigmas = gaze_windows.shape[-2]
+    flat = gaze_windows.reshape(-1, num_sigmas, 2)
+    B = flat.shape[0]
+
+    results = torch.zeros(B, 84, 84)
+    for b in range(B):
+        valid = ~torch.isnan(flat[b, :, 0])
+        indices = torch.where(valid)[0]
+        if len(indices) == 0:
+            continue
+        means = flat[b, indices].tolist()
+        offset_start = indices[0].item()
+        results[b] = MASK.find_bunch_of_maps(means=means, offset_start=offset_start)
+
+    return results.reshape(*batch_shape, 84, 84)
+
+
 def gabril_load_data(
     num_episodes=None,
     data_source="Our",
@@ -570,22 +635,6 @@ def gabril_load_data(
 
     gaze_info[:, :2] = g
 
-    short_memory_length = 20
-    stride = 2
-
-    saliency_sigmas = [
-        config.gaze_sigma / (0.99 ** (short_memory_length - i))
-        for i in range(short_memory_length + 1)
-    ]
-    coeficients = [
-        config.gaze_alpha ** (short_memory_length - i)
-        for i in range(short_memory_length + 1)
-    ]
-    coeficients += coeficients[::-1][1:]
-    saliency_sigmas += saliency_sigmas[::-1][1:]
-
-    MASK = GazeToMask(84, saliency_sigmas, coeficients=coeficients)
-
     episode_obs = []
     episode_actions = []
 
@@ -607,23 +656,7 @@ def gabril_load_data(
 
     episode_obs = [ep[:-1] for ep in episode_obs]
 
-    episode_saliency_gaze = [
-        torch.stack(
-            [
-                MASK.find_bunch_of_maps(
-                    means=ep[
-                        max(0, j - stride * short_memory_length) : min(
-                            short_memory_length * stride + j + 1, len(ep)
-                        ) : stride
-                    ],
-                    offset_start=max(short_memory_length - j, 0),
-                )
-                for j in range(len(ep))
-            ],
-            0,
-        )
-        for ep in tqdm(episode_gaze)
-    ]
+    episode_gaze_windows = gabril_gaze_windows(episode_gaze)
     episode_gaze_coordinates = [ep[:, :2] for ep in episode_gaze]
 
     # repeat the first frame for stack - 1 times
@@ -631,21 +664,21 @@ def gabril_load_data(
         torch.cat([ep[0].unsqueeze(0)] * (config.frame_stack - 1) + [ep])
         for ep in episode_obs
     ]
-    episode_saliency_gaze = [
+    episode_gaze_windows = [
         torch.cat([ep[0].unsqueeze(0)] * (config.frame_stack - 1) + [ep])
-        for ep in episode_saliency_gaze
+        for ep in episode_gaze_windows
     ]
 
-    for i, (ep_obs, ep_gaze) in enumerate(zip(episode_obs, episode_saliency_gaze)):
+    for i, (ep_obs, ep_gw) in enumerate(zip(episode_obs, episode_gaze_windows)):
         new_episode_obs = []
-        new_episode_saliency_gaze = []
+        new_episode_gaze_windows = []
         for s in range(config.frame_stack):
             end = None if s == config.frame_stack - 1 else s - config.frame_stack + 1
             new_episode_obs.append(ep_obs[s:end])
-            new_episode_saliency_gaze.append(ep_gaze[s:end])
+            new_episode_gaze_windows.append(ep_gw[s:end])
 
         episode_obs[i] = torch.stack(new_episode_obs, dim=1)
-        episode_saliency_gaze[i] = torch.stack(new_episode_saliency_gaze, dim=1)
+        episode_gaze_windows[i] = torch.stack(new_episode_gaze_windows, dim=1)
 
     unique_actions = np.unique(actions)
     num_actions = unique_actions.max() + 1
@@ -661,15 +694,15 @@ def gabril_load_data(
         episode_obs[i] = torch.from_numpy(np.stack(new_obs))
 
     episode_actions = [ep[1:] for ep in episode_actions]
-    episode_saliency_gaze = [ep[1:] for ep in episode_saliency_gaze]
+    episode_gaze_windows = [ep[1:] for ep in episode_gaze_windows]
     episode_gaze_coordinates = [ep[1:] for ep in episode_gaze_coordinates]
 
     observations = torch.cat(episode_obs)
     actions = torch.cat(episode_actions)
-    gaze_saliency_maps = torch.cat(episode_saliency_gaze)
+    gaze_windows = torch.cat(episode_gaze_windows)
     gaze_coordinates = torch.cat(episode_gaze_coordinates)
 
     observations = observations.float().unsqueeze(2) / 255.0
     actions = actions.long()
 
-    return observations, actions, gaze_saliency_maps, gaze_coordinates
+    return observations, actions, gaze_windows, gaze_coordinates

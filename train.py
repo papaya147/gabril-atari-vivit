@@ -152,6 +152,86 @@ def evaluate_agent(model: torch.nn.Module, split: Literal["test", "val"]):
     )
 
 
+def gaze_kl_loss(cls_attn: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+    """
+    Compute gaze regularization loss using KL divergence.
+
+    If gaze_loss_mode == "mean_then_kl": average attention across heads first,
+    then compute a single KL divergence per (batch, frame).
+
+    If gaze_loss_mode == "kl_then_mean": compute KL divergence per head first,
+    then average the per-head losses.
+
+    :param cls_attn: (B, F, SpatialHeads, T) — raw CLS attention from model
+    :param g: (B, F, GH, GW) — gaze target distribution (already normalized)
+    :return: scalar gaze loss
+    """
+    _, _, GH, GW = g.shape
+    eps = 1e-8
+
+    if config.gaze_loss_mode == "mean_then_kl":
+        # average across heads, then KL
+        attn = cls_attn.mean(dim=2)  # (B, F, T)
+        B, F, _ = attn.shape
+        attn = attn.view(
+            B,
+            F,
+            GH // config.spatial_patch_size[0],
+            GW // config.spatial_patch_size[1],
+        )  # (B, F, PH, PW)
+        attn = Fn.interpolate(
+            attn,
+            size=(GH, GW),
+            mode="bilinear",
+            align_corners=False,
+        )  # (B, F, GH, GW)
+
+        attn_flat = attn.reshape(B * F, -1) + eps
+        gaze_flat = g.reshape(B * F, -1) + eps
+
+        attn_flat = attn_flat / attn_flat.sum(dim=1, keepdim=True)
+        gaze_flat = gaze_flat / gaze_flat.sum(dim=1, keepdim=True)
+
+        loss = torch.sum(
+            gaze_flat * (torch.log(gaze_flat) - torch.log(attn_flat)), dim=1
+        )
+        return loss.mean()
+
+    elif config.gaze_loss_mode == "kl_then_mean":
+        # KL per head, then average across heads
+        B, F, heads, T = cls_attn.shape
+        pH = GH // config.spatial_patch_size[0]
+        pW = GW // config.spatial_patch_size[1]
+
+        # reshape each head's tokens to spatial grid and interpolate
+        attn = cls_attn.permute(2, 0, 1, 3)  # (heads, B, F, T)
+        attn = attn.reshape(heads * B, F, pH, pW)
+        attn = Fn.interpolate(
+            attn,
+            size=(GH, GW),
+            mode="bilinear",
+            align_corners=False,
+        )  # (heads * B, F, GH, GW)
+        attn = attn.reshape(heads, B, F, GH, GW)
+
+        # expand gaze target to match heads dimension
+        gaze_exp = g.unsqueeze(0).expand(heads, -1, -1, -1, -1)  # (heads, B, F, GH, GW)
+
+        attn_flat = attn.reshape(heads, B * F, -1) + eps
+        gaze_flat = gaze_exp.reshape(heads, B * F, -1) + eps
+
+        attn_flat = attn_flat / attn_flat.sum(dim=2, keepdim=True)
+        gaze_flat = gaze_flat / gaze_flat.sum(dim=2, keepdim=True)
+
+        # KL per head: (heads, B*F)
+        kl = torch.sum(gaze_flat * (torch.log(gaze_flat) - torch.log(attn_flat)), dim=2)
+        # mean over heads, then mean over (batch, frame)
+        return kl.mean()
+
+    else:
+        raise ValueError(f"Unknown gaze_loss_mode: {config.gaze_loss_mode}")
+
+
 def calculate_loss(
     model: torch.nn.Module,
     class_weights: torch.Tensor,
@@ -168,45 +248,7 @@ def calculate_loss(
         policy_loss = Fn.cross_entropy(pred_a, a, weight=class_weights)
 
         # gaze loss
-        _, _, GH, GW = g.shape
-
-        cls_attn = cls_attn.mean(dim=2)  # (B, F, T)
-        _, F, _ = cls_attn.shape
-        cls_attn = cls_attn.view(
-            -1,
-            F,
-            GH // config.spatial_patch_size[0],
-            GW // config.spatial_patch_size[1],
-        )  # (B, F, H / PH, W / PW)
-
-        cls_attn = Fn.interpolate(
-            cls_attn,
-            size=(GH, GW),
-            mode="bilinear",
-            align_corners=False,
-        )  # (B, F, H, W)
-
-        # current_sum = cls_attn.sum(dim=(2, 3), keepdim=True) + 1e-8
-        # cls_attn = cls_attn / current_sum
-        #
-        # gaze_loss = torch.norm(cls_attn - g, p="fro", dim=(1, 2)) ** 2
-        # gaze_loss = gaze_loss.mean()
-
-        B, F, H, W = cls_attn.shape
-        cls_attn_flat = cls_attn.view(B * F, -1)
-        gaze_flat = g.view(B * F, -1)
-
-        eps = 1e-8
-        cls_attn_flat = cls_attn_flat + eps
-        gaze_flat = gaze_flat + eps
-
-        cls_attn_flat = cls_attn_flat / cls_attn_flat.sum(dim=1, keepdim=True)
-        gaze_flat = gaze_flat / gaze_flat.sum(dim=1, keepdim=True)
-
-        gaze_loss = torch.sum(
-            gaze_flat * (torch.log(gaze_flat) - torch.log(cls_attn_flat)), dim=1
-        )
-        gaze_loss = gaze_loss.mean()
+        gaze_loss = gaze_kl_loss(cls_attn, g)
 
         return pred_a, policy_loss, gaze_loss
 

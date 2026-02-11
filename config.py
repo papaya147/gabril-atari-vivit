@@ -46,6 +46,9 @@ class Config:
     mlp_dim: int
     dropout: float
 
+    # gaze loss
+    gaze_loss_mode: str  # "mean_then_kl" or "kl_then_mean"
+
     # hyperparams
     learning_rate: float
     epochs: int
@@ -145,6 +148,13 @@ parser.add_argument("--batch-size", type=int, default=64)
 parser.add_argument(
     "--lambda-gaze", type=float, default=0.5, help="Weight for gaze auxiliary loss"
 )
+parser.add_argument(
+    "--gaze-loss-mode",
+    type=str,
+    choices=["mean_then_kl", "kl_then_mean"],
+    default="mean_then_kl",
+    help="Gaze loss mode: 'mean_then_kl' averages heads then KL, 'kl_then_mean' computes KL per head then averages",
+)
 parser.add_argument("--weight-decay", type=float, default=0.1)
 parser.add_argument("--scheduler-factor", type=float, default=0.5)
 parser.add_argument("--scheduler-patience", type=int, default=5)
@@ -204,6 +214,7 @@ config = Config(
     train_pct=args.train_pct,
     batch_size=args.batch_size,
     lambda_gaze=args.lambda_gaze,
+    gaze_loss_mode=args.gaze_loss_mode,
     weight_decay=args.weight_decay,
     scheduler_factor=args.scheduler_factor,
     scheduler_patience=args.scheduler_patience,

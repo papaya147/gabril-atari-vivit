@@ -654,10 +654,14 @@ def gabril_load_data(
         episode_actions = episode_actions[:num_episodes]
         episode_gaze = episode_gaze[:num_episodes]
 
+    # Free the raw loaded data — episode lists hold the slices we need
+    del loaded_obj, obs, gaze_info, terminateds, truncateds, episode_lengths
+
     episode_obs = [ep[:-1] for ep in episode_obs]
 
     episode_gaze_windows = gabril_gaze_windows(episode_gaze)
     episode_gaze_coordinates = [ep[:, :2] for ep in episode_gaze]
+    del episode_gaze
 
     # repeat the first frame for stack - 1 times
     episode_obs = [
@@ -698,11 +702,16 @@ def gabril_load_data(
     episode_gaze_coordinates = [ep[1:] for ep in episode_gaze_coordinates]
 
     observations = torch.cat(episode_obs)
+    del episode_obs
     actions = torch.cat(episode_actions)
+    del episode_actions
     gaze_windows = torch.cat(episode_gaze_windows)
+    del episode_gaze_windows
     gaze_coordinates = torch.cat(episode_gaze_coordinates)
+    del episode_gaze_coordinates
 
-    observations = observations.float().unsqueeze(2) / 255.0
+    observations = observations.float()
+    observations.unsqueeze_(2).div_(255.0)
     actions = actions.long()
 
     return observations, actions, gaze_windows, gaze_coordinates

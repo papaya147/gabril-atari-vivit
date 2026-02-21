@@ -153,7 +153,7 @@ parser.add_argument(
 )
 parser.add_argument("--batch-size", type=int, default=64)
 parser.add_argument(
-    "--lambda-gaze", type=float, default=0.25, help="Weight for gaze auxiliary loss"
+    "--lambda-gaze", type=float, default=0.5, help="Weight for gaze auxiliary loss"
 )
 parser.add_argument(
     "--gaze-loss-mode",

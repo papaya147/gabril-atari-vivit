@@ -274,7 +274,7 @@ def train(
     run_id = config.run_id
     date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     algo_label = f"{config.algorithm}_NoGaze" if config.no_gaze else config.algorithm
-    run_name = f"seed={config.seed}_{run_id}_{date_str}"
+    run_name = f"seed-{config.seed}_{run_id}_{date_str}"
     save_dir = os.path.join(config.save_folder, run_id)
     resume_path = os.path.join(save_dir, "latest_checkpoint.pt")
 

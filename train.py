@@ -332,6 +332,7 @@ def train(
             return_cls_attn=True,
             num_registers=config.num_registers,
         )
+    count_model_params(model, verbose=True)
     model = model.to(device)
     optimizer = optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
@@ -664,6 +665,28 @@ def preprocess(
     gaze_masks = gaze_masks / (gaze_sums + 1e-8)  # (B, F, H, W)
 
     return observations, gaze_masks  # gaze_mask_patches
+
+
+def count_model_params(model: torch.nn.Module, verbose: bool = True) -> int:
+    """
+    Count and optionally print model parameters.
+
+    :param model: PyTorch model
+    :param verbose: If True, print total params and per-module breakdown
+    :return: Total number of trainable parameters
+    """
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    if verbose:
+        print(f"Total params: {total:,}")
+        print(f"Trainable params: {trainable:,}")
+        for name, module in model.named_children():
+            n = sum(p.numel() for p in module.parameters())
+            if n > 0:
+                print(f"  {name}: {n:,}")
+
+    return trainable
 
 
 def set_seed(seed: int):

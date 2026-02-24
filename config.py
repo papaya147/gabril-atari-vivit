@@ -59,7 +59,6 @@ class Config:
     lambda_gaze: float
     weight_decay: float
     scheduler_factor: float
-    scheduler_patience: int
     clip_grad_norm: float
     warmup_epochs: int
     warmup_start_factor: float
@@ -124,7 +123,7 @@ parser.add_argument("--gaze-alpha", type=float, default=0.7)
 
 # augmentation parameters
 parser.add_argument("--aug-crop-padding", type=int, default=4)
-parser.add_argument("--aug-cutout-hole-size", type=int, default=12)
+parser.add_argument("--aug-cutout-hole-size", type=int, default=16)
 parser.add_argument("--aug-light-intensity", type=float, default=0.2)
 parser.add_argument("--aug-noise-std", type=float, default=0.01)
 parser.add_argument("--aug-p-pixel-dropout", type=float, default=0.01)
@@ -137,25 +136,25 @@ parser.add_argument("--aug-p-temporal", type=float, default=0.25)
 parser.add_argument(
     "--patch-size", type=int, default=6, help="Spatial patch size (square)"
 )
-parser.add_argument("--emb-dim", type=int, default=256)
-parser.add_argument("--spatial-depth", type=int, default=4)
-parser.add_argument("--temporal-depth", type=int, default=2)
-parser.add_argument("--spatial-heads", type=int, default=8)
-parser.add_argument("--temporal-heads", type=int, default=8)
-parser.add_argument("--inner-dim", type=int, default=64)
-parser.add_argument("--mlp-dim", type=int, default=512)
-parser.add_argument("--dropout", type=float, default=0.25)
+parser.add_argument("--emb-dim", type=int, default=128)
+parser.add_argument("--spatial-depth", type=int, default=3)
+parser.add_argument("--temporal-depth", type=int, default=1)
+parser.add_argument("--spatial-heads", type=int, default=4)
+parser.add_argument("--temporal-heads", type=int, default=4)
+parser.add_argument("--inner-dim", type=int, default=32)
+parser.add_argument("--mlp-dim", type=int, default=256)
+parser.add_argument("--dropout", type=float, default=0.35)
 parser.add_argument(
     "--num-registers", type=int, default=0, help="Number of register tokens. Default 0."
 )
 
 # hyperparams
-parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
+parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
 parser.add_argument("--epochs", type=int, default=500)
 parser.add_argument(
     "--train-pct", type=float, default=0.95, help="Percentage of data for training"
 )
-parser.add_argument("--batch-size", type=int, default=64)
+parser.add_argument("--batch-size", type=int, default=32)
 parser.add_argument(
     "--lambda-gaze", type=float, default=0.5, help="Weight for gaze auxiliary loss"
 )
@@ -166,9 +165,8 @@ parser.add_argument(
     default="mean_then_kl",
     help="Gaze loss mode: 'mean_then_kl' averages heads then KL, 'kl_then_mean' computes KL per head then averages",
 )
-parser.add_argument("--weight-decay", type=float, default=0.1)
+parser.add_argument("--weight-decay", type=float, default=0.01)
 parser.add_argument("--scheduler-factor", type=float, default=0.5)
-parser.add_argument("--scheduler-patience", type=int, default=5)
 parser.add_argument("--clip-grad-norm", type=float, default=1.0)
 parser.add_argument("--warmup-epochs", type=int, default=20)
 parser.add_argument("--warmup-start-factor", type=float, default=1e-10)
@@ -230,7 +228,6 @@ config = Config(
     gaze_loss_mode=args.gaze_loss_mode,
     weight_decay=args.weight_decay,
     scheduler_factor=args.scheduler_factor,
-    scheduler_patience=args.scheduler_patience,
     clip_grad_norm=args.clip_grad_norm,
     warmup_epochs=args.warmup_epochs,
     warmup_start_factor=args.warmup_start_factor,

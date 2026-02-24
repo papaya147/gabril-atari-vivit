@@ -311,7 +311,6 @@ def train(
             dropout=config.dropout,
             use_flash_attn=True,
             return_cls_attn=True,
-            use_temporal_mask=True,
             num_registers=config.num_registers,
         )
     else:
@@ -331,7 +330,6 @@ def train(
             dropout=config.dropout,
             use_flash_attn=True,
             return_cls_attn=True,
-            use_temporal_mask=True,
             num_registers=config.num_registers,
         )
     model = model.to(device)

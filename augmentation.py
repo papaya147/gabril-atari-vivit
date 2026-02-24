@@ -1,5 +1,5 @@
 import random
-from typing import Tuple
+from typing import Optional, Tuple
 
 import albumentations as A
 import numpy as np
@@ -101,6 +101,7 @@ class Augment:
         crop_padding: int,
         cutout_hole_size: int,
         p_spatial_corruption: float,
+        seed: Optional[int] = None,
     ):
         F, C, H, W = frame_shape
 
@@ -110,6 +111,7 @@ class Augment:
                 A.RandomCrop(84, 84, p=1),
             ],
             p=p_spatial_corruption,
+            seed=seed,
         )
 
         cutout = A.Lambda(
@@ -145,9 +147,9 @@ class Augment:
         # temporal_corruptions = [frame_drop]
 
         if F != 1:
-            self.augment = A.Compose([crop, cutout])
+            self.augment = A.Compose([crop, cutout], seed=seed)
         else:
-            self.augment = A.Compose([crop])
+            self.augment = A.Compose([crop], seed=seed)
 
     def __call__(
         self, observations: torch.Tensor, gaze_masks: torch.Tensor, **kwargs

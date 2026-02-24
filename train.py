@@ -649,6 +649,7 @@ def preprocess(
             crop_padding=config.augment_crop_padding,
             cutout_hole_size=config.augment_cutout_hole_size,
             p_spatial_corruption=config.augment_p_spatial_corruptions,
+            seed=config.seed,
         )
         observations, gaze_masks = augment(observations, gaze_masks)
 

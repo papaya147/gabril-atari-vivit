@@ -51,6 +51,9 @@ class Config:
     # gaze loss
     gaze_loss_mode: str  # "mean_then_kl" or "kl_then_mean"
 
+    # class imbalance
+    use_softmax_weighting: bool  # If True, use inverse-frequency class weights to rectify imbalance
+
     # hyperparams
     learning_rate: float
     epochs: int
@@ -111,6 +114,12 @@ parser.add_argument(
     default=False,
     help="Disable gaze regularization loss. Works with any architecture.",
 )
+parser.add_argument(
+    "--no-softmax-weighting",
+    action="store_true",
+    default=False,
+    help="Disable softmax weighing for class imbalance. When disabled, uses uniform weights.",
+)
 
 # frame handling
 parser.add_argument("--frame-stack", type=int, default=4)
@@ -143,7 +152,7 @@ parser.add_argument("--spatial-heads", type=int, default=4)
 parser.add_argument("--temporal-heads", type=int, default=4)
 parser.add_argument("--inner-dim", type=int, default=32)
 parser.add_argument("--mlp-dim", type=int, default=256)
-parser.add_argument("--dropout", type=float, default=0.35)
+parser.add_argument("--dropout", type=float, default=0.1)
 parser.add_argument(
     "--num-registers", type=int, default=0, help="Number of register tokens. Default 0."
 )
@@ -192,6 +201,7 @@ config = Config(
     seed=args.seed,
     algorithm=args.algorithm,
     no_gaze=args.no_gaze,
+    use_softmax_weighting=not args.no_softmax_weighting,
     frame_stack=args.frame_stack,
     frame_skip=args.frame_skip,
     # gaze

@@ -2,7 +2,7 @@ import datetime
 import os
 import random
 import sys
-from typing import Literal, Tuple
+from typing import Literal, Optional, Tuple
 
 import ale_py
 import cv2
@@ -234,7 +234,7 @@ def gaze_kl_loss(cls_attn: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
 
 def calculate_loss(
     model: torch.nn.Module,
-    class_weights: torch.Tensor,
+    class_weights: Optional[torch.Tensor],
     obs: torch.Tensor,
     g: torch.Tensor,
     a: torch.Tensor,
@@ -285,14 +285,17 @@ def train(
     class_counts = torch.bincount(all_actions)
     num_classes = len(class_counts)
 
-    safe_counts = class_counts.float()
-    safe_counts[safe_counts == 0] = 1.0
+    if config.use_softmax_weighting:
+        safe_counts = class_counts.float()
+        safe_counts[safe_counts == 0] = 1.0
 
-    total_samples = len(all_actions)
-    class_weights = total_samples / (num_classes * safe_counts)
-    class_weights = torch.sqrt(class_weights)
-    class_weights = torch.clamp(class_weights, min=1.0, max=10.0)
-    class_weights = class_weights.to(device=device)
+        total_samples = len(all_actions)
+        class_weights = total_samples / (num_classes * safe_counts)
+        class_weights = torch.sqrt(class_weights)
+        class_weights = torch.clamp(class_weights, min=1.0, max=10.0)
+        class_weights = class_weights.to(device=device)
+    else:
+        class_weights = None
 
     if config.algorithm == "AuxGazeFactorizedViViT":
         model = AuxGazeFactorizedViViT(
@@ -713,6 +716,11 @@ def main():
         )
     else:
         raise ValueError(f"Unknown loading method: {config.loading_method}")
+
+    values, counts = torch.unique(actions, return_counts=True)
+    d = {int(values[i]): int(counts[i]) for i in range(len(values))}
+    print(d)
+    exit()
 
     train(observations, gaze_coords, actions)
 

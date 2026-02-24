@@ -3,7 +3,7 @@
 #SBATCH --job-name=vivit_train
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
-#SBATCH --array=0-7
+#SBATCH --array=0-63
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -13,18 +13,21 @@
 #SBATCH --mem=24G
 #SBATCH --time=24:00:00
 
+GAMES=("Alien" "Asterix" "Breakout" "ChopperCommand" "MsPacman" "Qbert" "Seaquest" "UpNDown")
 ALGOS=("FactorizedViViT" "AuxGazeFactorizedViViT")
 METHODS=("mine" "gabril")
 GAZE_LOSS_MODES=("mean_then_kl" "kl_then_mean")
 # SEEDS=(100 101 102 103 104 105 106 107)
 
-# 8 tasks = 2 algos x 2 methods x 2 gaze loss modes
-# Task layout: ALGO_IDX = task/4, METHOD_IDX = (task%4)/2, GAZE_IDX = task%2
+# 64 tasks = 8 games x 2 algos x 2 methods x 2 gaze loss modes
+# Task layout: GAME_IDX = task/8, ALGO_IDX = (task%8)/4, METHOD_IDX = (task%8%4)/2, GAZE_IDX = task%2
 
-ALGO_IDX=$((SLURM_ARRAY_TASK_ID / 4))
-METHOD_IDX=$(((SLURM_ARRAY_TASK_ID % 4) / 2))
+GAME_IDX=$((SLURM_ARRAY_TASK_ID / 8))
+ALGO_IDX=$(((SLURM_ARRAY_TASK_ID % 8) / 4))
+METHOD_IDX=$((((SLURM_ARRAY_TASK_ID % 8) % 4) / 2))
 GAZE_IDX=$((SLURM_ARRAY_TASK_ID % 2))
 
+GAME=${GAMES[$GAME_IDX]}
 ALGO_NAME=${ALGOS[$ALGO_IDX]}
 LOADING_METHOD=${METHODS[$METHOD_IDX]}
 GAZE_LOSS_MODE=${GAZE_LOSS_MODES[$GAZE_IDX]}
@@ -39,7 +42,7 @@ export PY_BIN=/home1/adsrivat/.conda/envs/.venv/bin/python
 
 echo pwd
 echo "Job started on $(hostname) at $(date)"
-echo "Running Algorithm: $ALGO_NAME with Loading Method: $LOADING_METHOD (gaze_loss_mode=$GAZE_LOSS_MODE)"
+echo "Running Algorithm: $ALGO_NAME with Loading Method: $LOADING_METHOD (gaze_loss_mode=$GAZE_LOSS_MODE) on Game: $GAME"
 
 # Run your script
-$PY_BIN train.py --algorithm "$ALGO_NAME" --loading-method "$LOADING_METHOD" --gaze-loss-mode "$GAZE_LOSS_MODE"
+$PY_BIN train.py --algorithm "$ALGO_NAME" --loading-method "$LOADING_METHOD" --gaze-loss-mode "$GAZE_LOSS_MODE" --game "$GAME"

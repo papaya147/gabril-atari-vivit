@@ -16,7 +16,6 @@ class Attention(nn.Module):
         dropout: float = 0.0,
         use_flash_attn=True,
         return_last_block_attn: bool = False,
-        mask: torch.Tensor = None,
     ):
         super().__init__()
 
@@ -26,11 +25,6 @@ class Attention(nn.Module):
         self.scale = dim_head**-0.5
         no_project = heads == 1 and dim_head == dim
         self.return_last_block_attn = return_last_block_attn
-
-        if mask is not None:
-            self.register_buffer("mask", mask, persistent=False)
-        else:
-            self.mask = None
 
         self.ln1 = nn.LayerNorm(dim)
         self.wq = nn.Linear(dim, inner_dim, bias=False)
@@ -48,7 +42,7 @@ class Attention(nn.Module):
             else nn.Identity()
         )
 
-    def flash_attn(self, q, k, v, mask=None):
+    def flash_attn(self, q, k, v):
         with sdpa_kernel(
             [
                 SDPBackend.MATH,
@@ -61,7 +55,6 @@ class Attention(nn.Module):
                 q,
                 k,
                 v,
-                attn_mask=mask,
                 dropout_p=self.p_dropout,
                 is_causal=False,
                 scale=self.scale,
@@ -87,21 +80,11 @@ class Attention(nn.Module):
 
         last_block_attn = None
         if self.use_flash_attn and not self.return_last_block_attn:
-            out = self.flash_attn(
-                q, k, v, mask=self.mask
-            )  # (B, heads, T, inner_dim / heads)
+            out = self.flash_attn(q, k, v)  # (B, heads, T, inner_dim / heads)
         else:
             logits = (
                 torch.matmul(q, k.transpose(-1, -2)) * self.scale
             )  # (B, heads, T, T)
-
-            if self.mask is not None:
-                if self.mask.dtype == torch.bool:
-                    logits = logits.masked_fill(
-                        ~self.mask, -float("inf")
-                    )  # (B, heads, T, T)
-                else:
-                    logits = logits + self.mask  # (B, heads, T, T)
 
             attn = Fn.softmax(logits, dim=-1)  # (B, heads, T, T)
 
@@ -151,7 +134,6 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         use_flash_attn: bool = True,
         return_last_block_attn: bool = False,
-        mask: torch.Tensor = None,
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
@@ -166,7 +148,6 @@ class Transformer(nn.Module):
                             dropout=dropout,
                             use_flash_attn=use_flash_attn,
                             return_last_block_attn=False,  # we only want the [CLS] attn from the last block
-                            mask=mask,
                         ),
                         FeedForward(dim=dim, hidden_dim=mlp_dim, dropout=dropout),
                     ]
@@ -182,7 +163,6 @@ class Transformer(nn.Module):
                         dropout=dropout,
                         use_flash_attn=use_flash_attn,
                         return_last_block_attn=return_last_block_attn,
-                        mask=mask,
                     ),
                     FeedForward(dim=dim, hidden_dim=mlp_dim, dropout=dropout),
                 ]
@@ -340,7 +320,6 @@ class FactorizedViViT(nn.Module):
         dropout: float = 0.0,
         use_flash_attn: bool = True,
         return_cls_attn: bool = False,
-        use_temporal_mask: bool = True,
         num_registers: int = 0,
     ):
         super().__init__()
@@ -354,9 +333,14 @@ class FactorizedViViT(nn.Module):
 
         self.patch_emb = PatchEmbedding(patch_size, channels, dim)
         self.spatial_cls_token = nn.Parameter(torch.zeros(1, 1, dim))
-        self.spatial_pos_enc = nn.Parameter(torch.randn(1, frames, num_spatial_tokens, dim))
+        nn.init.trunc_normal_(self.spatial_cls_token, std=0.02)
+        self.spatial_pos_enc = nn.Parameter(
+            torch.zeros(1, frames, num_spatial_tokens, dim)
+        )
+        nn.init.trunc_normal_(self.spatial_pos_enc, std=0.02)
         if num_registers > 0:
             self.register_tokens = nn.Parameter(torch.zeros(1, num_registers, dim))
+            nn.init.trunc_normal_(self.register_tokens, std=0.02)
         else:
             self.register_tokens = None
         self.flatten_frames = Rearrange("b f n e -> (b f) n e")
@@ -375,15 +359,9 @@ class FactorizedViViT(nn.Module):
         self.unflatten_attn = Rearrange("(b f) h t1 t2 -> b f h t1 t2", f=frames)
         self.unflatten_frames = Rearrange("(b f) n e -> b f n e", f=frames)
         self.temporal_cls_token = nn.Parameter(torch.zeros(1, dim))
-        self.temporal_pos_enc = nn.Parameter(torch.randn(1, frames + 1, dim))
-
-        temporal_mask = None
-        if use_temporal_mask:
-            # [CLS] should attend to everything
-            # other tokens should only attend to past tokens
-            temporal_mask = torch.ones((frames + 1, frames + 1), dtype=torch.bool)
-            temporal_mask = torch.tril(temporal_mask)
-            temporal_mask[0, :] = True
+        nn.init.trunc_normal_(self.temporal_cls_token, std=0.02)
+        self.temporal_pos_enc = nn.Parameter(torch.zeros(1, frames + 1, dim))
+        nn.init.trunc_normal_(self.temporal_pos_enc, std=0.02)
 
         self.temporal_transformer = Transformer(
             dim=dim,
@@ -394,7 +372,6 @@ class FactorizedViViT(nn.Module):
             dropout=dropout,
             use_flash_attn=use_flash_attn,
             return_last_block_attn=False,  # [CLS] vs patch attention only exists in first transformer's attention layers
-            mask=temporal_mask,
         )
 
         self.l1 = nn.Linear(dim, n_classes)
@@ -411,7 +388,9 @@ class FactorizedViViT(nn.Module):
         spatial_cls_tokens = self.spatial_cls_token.expand(B, F, 1, -1)
         x = torch.cat((spatial_cls_tokens, x), dim=2)  # (B, F, T + 1, E)
         if self.register_tokens is not None:
-            reg_tokens = self.register_tokens.expand(B, F, -1, -1)  # (B, F, num_registers, E)
+            reg_tokens = self.register_tokens.expand(
+                B, F, -1, -1
+            )  # (B, F, num_registers, E)
             x = torch.cat((x, reg_tokens), dim=2)  # (B, F, T + 1 + num_registers, E)
         x = x + self.spatial_pos_enc  # (B, F, num_spatial_tokens, E)
         x = self.flatten_frames(x)  # (B * F, num_spatial_tokens, E)
@@ -424,10 +403,14 @@ class FactorizedViViT(nn.Module):
             last_block_attn
         )  # (B, F, SpatialHeads, num_spatial_tokens, num_spatial_tokens)
         cls_attn = cls_attn[:, :, :, 0, :]  # (B, F, SpatialHeads, num_spatial_tokens)
-        cls_attn = cls_attn[:, :, :, 1 : 1 + self.num_patches]  # (B, F, SpatialHeads, T) — exclude CLS and registers
+        cls_attn = cls_attn[
+            :, :, :, 1 : 1 + self.num_patches
+        ]  # (B, F, SpatialHeads, T) — exclude CLS and registers
 
         x = self.unflatten_frames(x)  # (B, F, num_spatial_tokens, E)
-        x = x[:, :, 0, :]  # (B, F, E) — only CLS for temporal; registers not used downstream
+        x = x[
+            :, :, 0, :
+        ]  # (B, F, E) — only CLS for temporal; registers not used downstream
         temporal_cls_tokens = self.temporal_cls_token.expand(B, 1, -1)
         x = torch.cat((temporal_cls_tokens, x), dim=1)  # (B, F + 1, E)
         x = x + self.temporal_pos_enc  # (B, F + 1, E)
@@ -463,7 +446,6 @@ class AuxGazeFactorizedViViT(nn.Module):
         dropout: float = 0.0,
         use_flash_attn: bool = True,
         return_cls_attn: bool = False,
-        use_temporal_mask: bool = True,
         num_registers: int = 0,
     ):
         super().__init__()
@@ -476,11 +458,17 @@ class AuxGazeFactorizedViViT(nn.Module):
         num_spatial_tokens = patches + 2 + num_registers
 
         self.patch_emb = PatchEmbedding(patch_size, channels, dim)
-        self.spatial_pol_token = nn.Parameter(torch.randn(1, 1, dim))
-        self.spatial_gaze_token = nn.Parameter(torch.randn(1, 1, dim))
-        self.spatial_pos_enc = nn.Parameter(torch.randn(1, frames, num_spatial_tokens, dim))
+        self.spatial_pol_token = nn.Parameter(torch.zeros(1, 1, dim))
+        nn.init.trunc_normal_(self.spatial_pol_token, std=0.02)
+        self.spatial_gaze_token = nn.Parameter(torch.zeros(1, 1, dim))
+        nn.init.trunc_normal_(self.spatial_gaze_token, std=0.02)
+        self.spatial_pos_enc = nn.Parameter(
+            torch.zeros(1, frames, num_spatial_tokens, dim)
+        )
+        nn.init.trunc_normal_(self.spatial_pos_enc, std=0.02)
         if num_registers > 0:
             self.register_tokens = nn.Parameter(torch.zeros(1, num_registers, dim))
+            nn.init.trunc_normal_(self.register_tokens, std=0.02)
         else:
             self.register_tokens = None
         self.flatten_frames = Rearrange("b f n e -> (b f) n e")
@@ -499,15 +487,9 @@ class AuxGazeFactorizedViViT(nn.Module):
         self.unflatten_attn = Rearrange("(b f) h t1 t2 -> b f h t1 t2", f=frames)
         self.unflatten_frames = Rearrange("(b f) n e -> b f n e", f=frames)
         self.temporal_cls_token = nn.Parameter(torch.zeros(1, dim))
-        self.temporal_pos_enc = nn.Parameter(torch.randn(1, frames + 1, dim))
-
-        temporal_mask = None
-        if use_temporal_mask:
-            # [POL] and [GAZE] should attend to everything
-            # other tokens should only attend to past tokens
-            temporal_mask = torch.ones((frames + 1, frames + 1), dtype=torch.bool)
-            temporal_mask = torch.tril(temporal_mask)
-            temporal_mask[0, :] = True
+        nn.init.trunc_normal_(self.temporal_cls_token, std=0.02)
+        self.temporal_pos_enc = nn.Parameter(torch.zeros(1, frames + 1, dim))
+        nn.init.trunc_normal_(self.temporal_pos_enc, std=0.02)
 
         self.temporal_transformer = Transformer(
             dim=dim,
@@ -518,7 +500,6 @@ class AuxGazeFactorizedViViT(nn.Module):
             dropout=dropout,
             use_flash_attn=use_flash_attn,
             return_last_block_attn=False,  # [CLS] vs patch attention only exists in first transformer's attention layers
-            mask=temporal_mask,
         )
 
         self.l1 = nn.Linear(dim, n_classes)
@@ -536,7 +517,9 @@ class AuxGazeFactorizedViViT(nn.Module):
         gaze_tokens = self.spatial_gaze_token.expand(B, F, -1, -1)  # (B, F, 1, E)
         x = torch.cat((pol_tokens, gaze_tokens, x), dim=2)  # (B, F, T + 2, E)
         if self.register_tokens is not None:
-            reg_tokens = self.register_tokens.expand(B, F, -1, -1)  # (B, F, num_registers, E)
+            reg_tokens = self.register_tokens.expand(
+                B, F, -1, -1
+            )  # (B, F, num_registers, E)
             x = torch.cat((x, reg_tokens), dim=2)  # (B, F, T + 2 + num_registers, E)
         x = x + self.spatial_pos_enc  # (B, F, num_spatial_tokens, E)
         x = self.flatten_frames(x)  # (B * F, num_spatial_tokens, E)
@@ -548,11 +531,17 @@ class AuxGazeFactorizedViViT(nn.Module):
         cls_attn = self.unflatten_attn(
             last_block_attn
         )  # (B, F, SpatialHeads, num_spatial_tokens, num_spatial_tokens)
-        gaze_attn = cls_attn[:, :, :, 1, :]  # (B, F, SpatialHeads, num_spatial_tokens) — GAZE token's attention
-        gaze_attn = gaze_attn[:, :, :, 2 : 2 + self.num_patches]  # (B, F, SpatialHeads, T) — over patches only, exclude registers
+        gaze_attn = cls_attn[
+            :, :, :, 1, :
+        ]  # (B, F, SpatialHeads, num_spatial_tokens) — GAZE token's attention
+        gaze_attn = gaze_attn[
+            :, :, :, 2 : 2 + self.num_patches
+        ]  # (B, F, SpatialHeads, T) — over patches only, exclude registers
 
         x = self.unflatten_frames(x)  # (B, F, num_spatial_tokens, E)
-        x = x[:, :, 0, :]  # (B, F, E) — only POL for temporal; registers not used downstream
+        x = x[
+            :, :, 0, :
+        ]  # (B, F, E) — only POL for temporal; registers not used downstream
         temporal_cls_tokens = self.temporal_cls_token.expand(B, 1, -1)
         x = torch.cat((temporal_cls_tokens, x), dim=1)  # (B, F + 1, E)
         x = x + self.temporal_pos_enc  # (B, F + 1, E)
@@ -587,7 +576,6 @@ class FusedGazeFactorizedViViT(nn.Module):
         dropout: float = 0.0,
         use_flash_attn: bool = True,
         return_cls_attn: bool = False,
-        use_temporal_mask: bool = True,
     ):
         super().__init__()
 
@@ -620,14 +608,6 @@ class FusedGazeFactorizedViViT(nn.Module):
         self.fusion_norm = nn.LayerNorm(dim)
         self.fusion_dropout = nn.Dropout(dropout)
 
-        temporal_mask = None
-        if use_temporal_mask:
-            # [POL] and [GAZE] should attend to everything
-            # other tokens should only attend to past tokens
-            temporal_mask = torch.ones((frames + 1, frames + 1), dtype=torch.bool)
-            temporal_mask = torch.tril(temporal_mask)
-            temporal_mask[0, :] = True
-
         self.temporal_transformer = Transformer(
             dim=dim,
             depth=temporal_depth,
@@ -637,7 +617,6 @@ class FusedGazeFactorizedViViT(nn.Module):
             dropout=dropout,
             use_flash_attn=use_flash_attn,
             return_last_block_attn=False,  # [CLS] vs patch attention only exists in first transformer's attention layers
-            mask=temporal_mask,
         )
 
         self.l1 = nn.Linear(dim, n_classes)

@@ -717,11 +717,6 @@ def main():
     else:
         raise ValueError(f"Unknown loading method: {config.loading_method}")
 
-    values, counts = torch.unique(actions, return_counts=True)
-    d = {int(values[i]): int(counts[i]) for i in range(len(values))}
-    print(d)
-    exit()
-
     train(observations, gaze_coords, actions)
 
 

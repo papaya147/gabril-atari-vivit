@@ -15,6 +15,9 @@
 
 ALGOS=("FactorizedViViT" "AuxGazeFactorizedViViT")
 
+# Game passed as first argument: sbatch slurm/train-carc-no-gaze.slurm Alien
+GAME=${1:-ChopperCommand}
+
 ALGO_NAME=${ALGOS[$SLURM_ARRAY_TASK_ID]}
 
 cd $SLURM_SUBMIT_DIR
@@ -26,7 +29,7 @@ export PY_BIN=/home1/adsrivat/.conda/envs/.venv/bin/python
 
 echo pwd
 echo "Job started on $(hostname) at $(date)"
-echo "Running Algorithm: $ALGO_NAME (no gaze)"
+echo "Running Algorithm: $ALGO_NAME (no gaze) on Game: $GAME"
 
 # Run your script
-$PY_BIN train.py --algorithm "$ALGO_NAME" --no-gaze
+$PY_BIN train.py --algorithm "$ALGO_NAME" --no-gaze --game "$GAME"

@@ -288,7 +288,7 @@ def load_data() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     :return: observations (B, F, C, H, W), gaze_coords (B, F, layers, 2), actions (B)
     """
     folder = f"{config.atari_dataset_folder}/{config.game}"
-    files_list = [p for p in Path(folder).iterdir() if p.is_file()]
+    files_list = sorted(p for p in Path(folder).iterdir() if p.is_file())
     dataset = torch.load(files_list[0], weights_only=False)
 
     observations = torch.from_numpy(dataset["observations"]).to(

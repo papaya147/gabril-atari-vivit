@@ -1,6 +1,6 @@
 import os
 import random
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -19,6 +19,8 @@ def save(
     optimizer: optim.Optimizer,
     scaler: GradScaler,
     scheduler: SequentialLR = None,
+    train_generator: Optional[torch.Generator] = None,
+    val_generator: Optional[torch.Generator] = None,
 ):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
@@ -40,6 +42,11 @@ def save(
             "python": random.getstate(),
         },
     }
+    if train_generator is not None:
+        checkpoint_data["train_generator_state"] = train_generator.get_state()
+    if val_generator is not None:
+        checkpoint_data["val_generator_state"] = val_generator.get_state()
+
     torch.save(checkpoint_data, path)
 
 
@@ -49,6 +56,8 @@ def load(
     optimizer: optim.Optimizer,
     scaler: GradScaler,
     scheduler: SequentialLR = None,
+    train_generator: Optional[torch.Generator] = None,
+    val_generator: Optional[torch.Generator] = None,
 ) -> Tuple[int, float]:
     if not os.path.exists(path):
         return 0, -float("inf")
@@ -73,6 +82,12 @@ def load(
         torch.cuda.set_rng_state_all(cuda_states)
         np.random.set_state(rng["numpy"])
         random.setstate(rng["python"])
+
+    # Restore DataLoader generator states for deterministic shuffle on resume
+    if train_generator is not None and "train_generator_state" in checkpoint:
+        train_generator.set_state(checkpoint["train_generator_state"].cpu())
+    if val_generator is not None and "val_generator_state" in checkpoint:
+        val_generator.set_state(checkpoint["val_generator_state"].cpu())
 
     # Extract metadata
     start_epoch = checkpoint["epoch"] + 1

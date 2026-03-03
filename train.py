@@ -26,8 +26,9 @@ from config import config
 from device import device
 from vivit import AuxGazeFactorizedViViT, FactorizedViViT
 
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
+# TF32 disabled for reproducibility; enable for faster training if needed
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
 
 
 def evaluate_agent(model: torch.nn.Module, split: Literal["test", "val"]):
@@ -360,10 +361,6 @@ def train(
         milestones=[config.warmup_epochs],
     )
 
-    start_epoch, best_return = checkpoint.load(
-        resume_path, model, optimizer, scaler, scheduler
-    )
-
     run = wandb.init(
         entity="papaya147-ml",
         project="ViViT-GABRIL-Atari",
@@ -388,6 +385,10 @@ def train(
     train_dataset = TensorDataset(train_obs, train_gaze, train_acts)
     val_dataset = TensorDataset(val_obs, val_gaze, val_acts)
 
+    # Deterministic shuffling via generator for reproducibility
+    train_generator = torch.Generator().manual_seed(config.seed)
+    val_generator = torch.Generator().manual_seed(config.seed + 1)
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
@@ -395,6 +396,7 @@ def train(
         num_workers=4,
         pin_memory=True,
         persistent_workers=True,
+        generator=train_generator,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -403,6 +405,12 @@ def train(
         num_workers=4,
         pin_memory=True,
         persistent_workers=True,
+        generator=val_generator,
+    )
+
+    start_epoch, best_return = checkpoint.load(
+        resume_path, model, optimizer, scaler, scheduler,
+        train_generator=train_generator, val_generator=val_generator,
     )
 
     for e in range(start_epoch, config.epochs):
@@ -518,7 +526,8 @@ def train(
         run.log(data=log_data)
 
         checkpoint.save(
-            resume_path, e, best_return, model, optimizer, scaler, scheduler
+            resume_path, e, best_return, model, optimizer, scaler, scheduler,
+            train_generator=train_generator, val_generator=val_generator,
         )
 
     # testing and saving final model
@@ -694,13 +703,19 @@ def count_model_params(model: torch.nn.Module, verbose: bool = True) -> int:
 
 def set_seed(seed: int):
     """
-    Sets the seed for all sources of randomness.
+    Sets the seed for all sources of randomness to ensure reproducible training.
     """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
+    # cuDNN: deterministic algorithms (slower but reproducible)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # Disable TF32 for bit-exact reproducibility
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
 
 
 def main():

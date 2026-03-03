@@ -3,7 +3,7 @@
 #SBATCH --job-name=vivit_no_gaze
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
-#SBATCH --array=0-1
+#SBATCH --array=0-15
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -14,11 +14,19 @@
 #SBATCH --time=24:00:00
 
 ALGOS=("FactorizedViViT" "AuxGazeFactorizedViViT")
+SEEDS=(100 101 102 103 104 105 106 107)
 
 # Game passed as first argument: sbatch slurm/train-carc-no-gaze.slurm Alien
 GAME=${1:-ChopperCommand}
 
-ALGO_NAME=${ALGOS[$SLURM_ARRAY_TASK_ID]}
+# 16 tasks = 2 algos x 8 seeds
+# Task layout: ALGO_IDX = task/8, SEED_IDX = task%8
+
+ALGO_IDX=$((SLURM_ARRAY_TASK_ID / 8))
+SEED_IDX=$((SLURM_ARRAY_TASK_ID % 8))
+
+ALGO_NAME=${ALGOS[$ALGO_IDX]}
+SEED=${SEEDS[$SEED_IDX]}
 
 cd $SLURM_SUBMIT_DIR
 
@@ -29,7 +37,7 @@ export PY_BIN=/home1/adsrivat/.conda/envs/.venv/bin/python
 
 echo pwd
 echo "Job started on $(hostname) at $(date)"
-echo "Running Algorithm: $ALGO_NAME (no gaze) on Game: $GAME"
+echo "Running Algorithm: $ALGO_NAME (no gaze) seed=$SEED on Game: $GAME"
 
 # Run your script
-$PY_BIN train.py --algorithm "$ALGO_NAME" --no-gaze --game "$GAME"
+$PY_BIN train.py --algorithm "$ALGO_NAME" --no-gaze --game "$GAME" --seed "$SEED"

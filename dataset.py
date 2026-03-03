@@ -53,26 +53,36 @@ def break_episodes(
 
 
 def layer_gazes(
-    gaze_coords: List[torch.Tensor], layers: int = 20
+    gaze_coords: List[torch.Tensor],
+    past_layers: int = 20,
+    future_layers: int | None = None,
 ) -> List[torch.Tensor]:
     """
-    Stacks the previous l-1 gaze coordinates for each time step.
-    If there aren't enough previous frames (at the start), repeats the first frame.
+    Stacks gaze coordinates in a centered sliding window (past + current + future).
+    Applies temporal decay and blur growth symmetrically to both past and future.
 
     :param gaze_coords: List of tensors, each shape (N, 2)
-    :param layers: History layers to stack
-    :return: List of tensors, each shape (N, layers, 2)
+    :param past_layers: Number of past frames to include before current.
+    :param future_layers: Number of future frames to include after current.
+                          If None, uses past_layers (symmetric window).
+    :return: List of tensors, each shape (N, past_layers + 1 + future_layers, 2).
+             The center index (past_layers) is the current frame.
     """
+    if future_layers is None:
+        future_layers = past_layers
+
+    window_size = past_layers + 1 + future_layers
     layered_gazes = []
 
     for episode_gaze in gaze_coords:
-        if layers > 1:
-            padding = episode_gaze[0].unsqueeze(0).repeat(layers - 1, 1)
-            padded_gaze = torch.cat([padding, episode_gaze], dim=0)
+        if window_size > 1:
+            first_frame = episode_gaze[0].unsqueeze(0).repeat(past_layers, 1)
+            last_frame = episode_gaze[-1].unsqueeze(0).repeat(future_layers, 1)
+            padded_gaze = torch.cat([first_frame, episode_gaze, last_frame], dim=0)
         else:
             padded_gaze = episode_gaze
 
-        windows = padded_gaze.unfold(0, layers, 1)
+        windows = padded_gaze.unfold(0, window_size, 1)
         windows = windows.permute(0, 2, 1)
         layered_gazes.append(windows)
 
@@ -121,16 +131,18 @@ def decaying_gaussian_mask(
     """
     Generates cumulative heatmaps with Recasens et al. formulation:
     Sum of Gaussians with fading amplitude and growing variance.
+    Supports both past and future gaze via symmetric temporal decay and blur.
 
     Formula: Sum[ alpha^|j| * N(x, gamma * beta^-|j|) ]
+    where j is the distance from the target (current) frame in either direction.
 
     :param gaze_coords: (..., layers, 2). Last dim is (x, y), 2nd-to-last is Time.
-                        Values should be normalized coordinates [0, 1].
+                        Center index is the current frame (T=0). Values [0, 1].
     :param shape: (height, width) of the image.
     :param base_sigma: The size of the spot at the current frame (T=0).
-    :param temporal_decay: How fast intensity fades (0.0 to 1.0).
-    :param blur_growth: How fast variance grows/blurs backwards (0.0 to 1.0).
-                        (Note: <1.0 means it grows as you go back in time).
+    :param temporal_decay: How fast intensity fades (0.0 to 1.0) with distance.
+    :param blur_growth: How fast variance grows/blurs with distance (0.0 to 1.0).
+                        (Note: <1.0 means it grows as you go away from T=0).
     :return: (..., height, width). Batch dims matching input.
     """
     H, W = shape
@@ -155,11 +167,11 @@ def decaying_gaussian_mask(
 
     heatmap = torch.zeros((B, H, W), dtype=torch.float32, device=device)
 
-    # We assume the last frame in the stack is T=0 (the target)
-    target_idx = L - 1
+    # Center of window is T=0 (the target frame); applies to past and future
+    target_idx = (L - 1) // 2
 
     for t in range(L):
-        # j = distance from target frame (e.g., -5, -4, ... 0)
+        # j = distance from target frame (negative = past, positive = future)
         j = t - target_idx
         abs_j = abs(j)
 
@@ -298,7 +310,7 @@ def load_data() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     )
 
     layers = int(math.ceil(math.log(0.005, config.gaze_alpha)))
-    gaze_coord_list = layer_gazes(gaze_coord_list, layers=layers)
+    gaze_coord_list = layer_gazes(gaze_coord_list, past_layers=layers, future_layers=layers)
 
     observations, gaze_coords = stack_observations_and_gaze_coords(
         observation_list, gaze_coord_list, config.frame_stack

@@ -449,39 +449,39 @@ def train(
             metrics["train/train_gaze_loss"] += gaze_loss.item() * curr_batch_size
             metrics["train/train_acc"] += acc.item()
 
+        # validation (every epoch)
+        metrics["eval/val_loss"] = 0
+        metrics["eval/val_policy_loss"] = 0
+        metrics["eval/val_gaze_loss"] = 0
+        metrics["eval/val_acc"] = 0
+
+        model.eval()
+        with torch.no_grad():
+            for obs, g, a in val_loader:
+                obs, g = preprocess(
+                    obs, g, augment=False
+                )  # obs: (B, F, C, H, W), g: (B, F, H, W)
+                a = a.to(device=device)  # (B, n_actions)
+
+                pred_a, policy_loss, gaze_loss = calculate_loss(
+                    model, class_weights, obs, g, a
+                )
+                loss = policy_loss + config.lambda_gaze * gaze_loss
+
+                acc = (pred_a.argmax(dim=1) == a).float().sum()
+
+                curr_batch_size = obs.size(0)
+
+                metrics["eval/val_loss"] += loss.item() * curr_batch_size
+                metrics["eval/val_policy_loss"] += (
+                    policy_loss.item() * curr_batch_size
+                )
+                metrics["eval/val_gaze_loss"] += gaze_loss.item() * curr_batch_size
+                metrics["eval/val_acc"] += acc.item()
+
+        # rollouts (every 100 epochs)
         mean_return = -1
-        if (e + 1) % config.val_interval == 0:
-            metrics["eval/val_loss"] = 0
-            metrics["eval/val_policy_loss"] = 0
-            metrics["eval/val_gaze_loss"] = 0
-            metrics["eval/val_acc"] = 0
-
-            # validation
-            model.eval()
-            with torch.no_grad():
-                for obs, g, a in val_loader:
-                    obs, g = preprocess(
-                        obs, g, augment=False
-                    )  # obs: (B, F, C, H, W), g: (B, F, H, W)
-                    a = a.to(device=device)  # (B, n_actions)
-
-                    pred_a, policy_loss, gaze_loss = calculate_loss(
-                        model, class_weights, obs, g, a
-                    )
-                    loss = policy_loss + config.lambda_gaze * gaze_loss
-
-                    acc = (pred_a.argmax(dim=1) == a).float().sum()
-
-                    curr_batch_size = obs.size(0)
-
-                    metrics["eval/val_loss"] += loss.item() * curr_batch_size
-                    metrics["eval/val_policy_loss"] += (
-                        policy_loss.item() * curr_batch_size
-                    )
-                    metrics["eval/val_gaze_loss"] += gaze_loss.item() * curr_batch_size
-                    metrics["eval/val_acc"] += acc.item()
-
-            # testing
+        if (e + 1) % 100 == 0:
             (
                 ep_returns,
                 ep_steps,

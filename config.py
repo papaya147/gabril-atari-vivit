@@ -96,7 +96,7 @@ parser.add_argument(
     "--loading-method",
     type=str,
     choices=["mine", "gabril"],
-    default="mine",
+    default="gabril",
     help="Data loading method: 'mine' or 'gabril'",
 )
 parser.add_argument("--use-plots", action="store_true", default=False)

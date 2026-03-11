@@ -16,6 +16,7 @@ class Attention(nn.Module):
         dropout: float = 0.0,
         use_flash_attn=True,
         return_last_block_attn: bool = False,
+        mask: torch.Tensor = None,
     ):
         super().__init__()
 
@@ -25,6 +26,11 @@ class Attention(nn.Module):
         self.scale = dim_head**-0.5
         no_project = heads == 1 and dim_head == dim
         self.return_last_block_attn = return_last_block_attn
+
+        if mask is not None:
+            self.register_buffer("mask", mask, persistent=False)
+        else:
+            self.mask = None
 
         self.ln1 = nn.LayerNorm(dim)
         self.wq = nn.Linear(dim, inner_dim, bias=False)
@@ -42,7 +48,7 @@ class Attention(nn.Module):
             else nn.Identity()
         )
 
-    def flash_attn(self, q, k, v):
+    def flash_attn(self, q, k, v, mask=None):
         with sdpa_kernel(
             [
                 SDPBackend.MATH,
@@ -55,6 +61,7 @@ class Attention(nn.Module):
                 q,
                 k,
                 v,
+                attn_mask=mask,
                 dropout_p=self.p_dropout,
                 is_causal=False,
                 scale=self.scale,
@@ -80,11 +87,17 @@ class Attention(nn.Module):
 
         last_block_attn = None
         if self.use_flash_attn and not self.return_last_block_attn:
-            out = self.flash_attn(q, k, v)  # (B, heads, T, inner_dim / heads)
+            out = self.flash_attn(q, k, v, mask=self.mask)  # (B, heads, T, inner_dim / heads)
         else:
             logits = (
                 torch.matmul(q, k.transpose(-1, -2)) * self.scale
             )  # (B, heads, T, T)
+
+            if self.mask is not None:
+                if self.mask.dtype == torch.bool:
+                    logits = logits.masked_fill(~self.mask, -float("inf"))
+                else:
+                    logits = logits + self.mask
 
             attn = Fn.softmax(logits, dim=-1)  # (B, heads, T, T)
 
@@ -134,6 +147,7 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         use_flash_attn: bool = True,
         return_last_block_attn: bool = False,
+        mask: torch.Tensor = None,
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
@@ -148,6 +162,7 @@ class Transformer(nn.Module):
                             dropout=dropout,
                             use_flash_attn=use_flash_attn,
                             return_last_block_attn=False,  # we only want the [CLS] attn from the last block
+                            mask=mask,
                         ),
                         FeedForward(dim=dim, hidden_dim=mlp_dim, dropout=dropout),
                     ]
@@ -163,6 +178,7 @@ class Transformer(nn.Module):
                         dropout=dropout,
                         use_flash_attn=use_flash_attn,
                         return_last_block_attn=return_last_block_attn,
+                        mask=mask,
                     ),
                     FeedForward(dim=dim, hidden_dim=mlp_dim, dropout=dropout),
                 ]
@@ -363,6 +379,11 @@ class FactorizedViViT(nn.Module):
         self.temporal_pos_enc = nn.Parameter(torch.zeros(1, frames + 1, dim))
         nn.init.trunc_normal_(self.temporal_pos_enc, std=0.02)
 
+        # Causal mask: [CLS] attends to all; frame tokens attend only to past
+        temporal_mask = torch.ones((frames + 1, frames + 1), dtype=torch.bool)
+        temporal_mask = torch.tril(temporal_mask)
+        temporal_mask[0, :] = True
+
         self.temporal_transformer = Transformer(
             dim=dim,
             depth=temporal_depth,
@@ -372,6 +393,7 @@ class FactorizedViViT(nn.Module):
             dropout=dropout,
             use_flash_attn=use_flash_attn,
             return_last_block_attn=False,  # [CLS] vs patch attention only exists in first transformer's attention layers
+            mask=temporal_mask,
         )
 
         self.l1 = nn.Linear(dim, n_classes)
@@ -491,6 +513,11 @@ class AuxGazeFactorizedViViT(nn.Module):
         self.temporal_pos_enc = nn.Parameter(torch.zeros(1, frames + 1, dim))
         nn.init.trunc_normal_(self.temporal_pos_enc, std=0.02)
 
+        # Causal mask: [CLS] attends to all; frame tokens attend only to past
+        temporal_mask = torch.ones((frames + 1, frames + 1), dtype=torch.bool)
+        temporal_mask = torch.tril(temporal_mask)
+        temporal_mask[0, :] = True
+
         self.temporal_transformer = Transformer(
             dim=dim,
             depth=temporal_depth,
@@ -500,6 +527,7 @@ class AuxGazeFactorizedViViT(nn.Module):
             dropout=dropout,
             use_flash_attn=use_flash_attn,
             return_last_block_attn=False,  # [CLS] vs patch attention only exists in first transformer's attention layers
+            mask=temporal_mask,
         )
 
         self.l1 = nn.Linear(dim, n_classes)

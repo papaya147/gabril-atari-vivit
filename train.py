@@ -363,7 +363,7 @@ def train(
 
     run = wandb.init(
         entity="papaya147-ml",
-        project="ViViT-GABRIL-Atari",
+        project="FactorizedViViT-GABRIL-Atari",
         config=config.__dict__,
         name=run_name,
         job_type="train",

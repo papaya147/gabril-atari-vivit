@@ -385,6 +385,10 @@ def train(
     train_dataset = TensorDataset(train_obs, train_gaze, train_acts)
     val_dataset = TensorDataset(val_obs, val_gaze, val_acts)
 
+    # Log action distribution in training data (diagnostic)
+    action_counts = torch.bincount(train_acts.view(-1), minlength=n_actions)
+    print(f"Train action distribution: {action_counts.tolist()}")
+
     # Deterministic shuffling via generator for reproducibility
     train_generator = torch.Generator().manual_seed(config.seed)
     val_generator = torch.Generator().manual_seed(config.seed + 1)
@@ -456,6 +460,7 @@ def train(
         metrics["eval/val_acc"] = 0
 
         model.eval()
+        all_pred_actions = []
         with torch.no_grad():
             for obs, g, a in val_loader:
                 obs, g = preprocess(
@@ -469,6 +474,7 @@ def train(
                 loss = policy_loss + config.lambda_gaze * gaze_loss
 
                 acc = (pred_a.argmax(dim=1) == a).float().sum()
+                all_pred_actions.extend(pred_a.argmax(dim=1).cpu().tolist())
 
                 curr_batch_size = obs.size(0)
 
@@ -478,6 +484,11 @@ def train(
                 )
                 metrics["eval/val_gaze_loss"] += gaze_loss.item() * curr_batch_size
                 metrics["eval/val_acc"] += acc.item()
+
+        # Diagnostic: detect action collapse
+        unique_pred = len(set(all_pred_actions)) if all_pred_actions else 0
+        if unique_pred == 1 and all_pred_actions and e < 10:
+            print(f"[Epoch {e}] COLLAPSE: model predicts only action {all_pred_actions[0]}")
 
         # rollouts (every 100 epochs)
         mean_return = -1
@@ -505,6 +516,7 @@ def train(
         }
         log_data["epoch"] = e
         log_data["train/learning_rate"] = optimizer.param_groups[0]["lr"]
+        log_data["eval/unique_predicted_actions"] = unique_pred
         if mean_return != -1:
             log_data["eval/mean_return"] = mean_return
             log_data["eval/std_return"] = float(ep_returns.std())

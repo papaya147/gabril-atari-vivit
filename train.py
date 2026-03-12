@@ -363,7 +363,7 @@ def train(
 
     run = wandb.init(
         entity="papaya147-ml",
-        project="FactorizedViViT-GABRIL-Atari",
+        project="ViViT-GABRIL-Atari",
         config=config.__dict__,
         name=run_name,
         job_type="train",
@@ -413,8 +413,13 @@ def train(
     )
 
     start_epoch, best_return = checkpoint.load(
-        resume_path, model, optimizer, scaler, scheduler,
-        train_generator=train_generator, val_generator=val_generator,
+        resume_path,
+        model,
+        optimizer,
+        scaler,
+        scheduler,
+        train_generator=train_generator,
+        val_generator=val_generator,
     )
 
     for e in range(start_epoch, config.epochs):
@@ -479,16 +484,16 @@ def train(
                 curr_batch_size = obs.size(0)
 
                 metrics["eval/val_loss"] += loss.item() * curr_batch_size
-                metrics["eval/val_policy_loss"] += (
-                    policy_loss.item() * curr_batch_size
-                )
+                metrics["eval/val_policy_loss"] += policy_loss.item() * curr_batch_size
                 metrics["eval/val_gaze_loss"] += gaze_loss.item() * curr_batch_size
                 metrics["eval/val_acc"] += acc.item()
 
         # Diagnostic: detect action collapse
         unique_pred = len(set(all_pred_actions)) if all_pred_actions else 0
         if unique_pred == 1 and all_pred_actions and e < 10:
-            print(f"[Epoch {e}] COLLAPSE: model predicts only action {all_pred_actions[0]}")
+            print(
+                f"[Epoch {e}] COLLAPSE: model predicts only action {all_pred_actions[0]}"
+            )
 
         # rollouts (every 100 epochs)
         mean_return = -1
@@ -538,8 +543,15 @@ def train(
         run.log(data=log_data)
 
         checkpoint.save(
-            resume_path, e, best_return, model, optimizer, scaler, scheduler,
-            train_generator=train_generator, val_generator=val_generator,
+            resume_path,
+            e,
+            best_return,
+            model,
+            optimizer,
+            scaler,
+            scheduler,
+            train_generator=train_generator,
+            val_generator=val_generator,
         )
 
     # testing and saving final model

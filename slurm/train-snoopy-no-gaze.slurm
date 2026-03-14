@@ -30,10 +30,10 @@ cd $SLURM_SUBMIT_DIR
 # threading fix
 export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-export PY_BIN=/scr/adsrivat/gabril-atari-vivit/.venv/bin/activate
+source /scr/adsrivat/gabril-atari-vivit/.venv/bin/activate
 
 echo "Current directory: $(pwd)"
 echo "Job started on $(hostname) at $(date)"
 echo "Running Algorithm: $ALGO_NAME (no gaze) seed=$SEED on Game: $GAME"
 
-$PY_BIN train.py --algorithm "$ALGO_NAME" --no-gaze --game "$GAME" --seed "$SEED"
+srun python train.py --algorithm "$ALGO_NAME" --no-gaze --game "$GAME" --seed "$SEED"

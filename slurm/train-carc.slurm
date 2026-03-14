@@ -37,7 +37,7 @@ export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 export PY_BIN=/home1/adsrivat/.conda/envs/.venv/bin/python
 
-echo pwd
+echo "Current directory: $(pwd)"
 echo "Job started on $(hostname) at $(date)"
 echo "Running Algorithm: $ALGO_NAME with Loading Method: $LOADING_METHOD (gaze_loss_mode=$GAZE_LOSS_MODE) seed=$SEED on Game: $GAME"
 
